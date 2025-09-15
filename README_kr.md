@@ -3,7 +3,7 @@
 
 이 프로젝트는 [Wan22](https://github.com/Comfy-Org/Wan_2.2_ComfyUI_Repackaged)를 RunPod Serverless 환경에서 쉽게 배포하고 사용할 수 있도록 설계된 템플릿입니다.
 
-[![Runpod](https://api.runpod.io/badge/wlsdml1114/wan22_Runpod_hub_alt)](https://console.runpod.io/hub/wlsdml1114/wan22_Runpod_hub_alt)
+[![Runpod](https://api.runpod.io/badge/wlsdml1114/generate_video)](https://console.runpod.io/hub/wlsdml1114/generate_video)
 
 Wan22는 정적 이미지를 자연스러운 움직임과 사실적인 애니메이션을 가진 고품질 비디오로 생성하는 고급 AI 모델입니다.
 

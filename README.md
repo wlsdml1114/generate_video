@@ -3,7 +3,7 @@
 
 This project is a template designed to easily deploy and use [Wan22](https://github.com/Comfy-Org/Wan_2.2_ComfyUI_Repackaged) in the RunPod Serverless environment.
 
-[![Runpod](https://api.runpod.io/badge/wlsdml1114/wan22_Runpod_hub_alt)](https://console.runpod.io/hub/wlsdml1114/wan22_Runpod_hub_alt)
+[![Runpod](https://api.runpod.io/badge/wlsdml1114/generate_video)](https://console.runpod.io/hub/wlsdml1114/generate_video)
 
 Wan22 is an advanced AI model that generates high-quality videos from images with natural motion and realistic animations.
 
