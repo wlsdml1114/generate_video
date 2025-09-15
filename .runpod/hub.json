@@ -1,0 +1,18 @@
+{
+    "title": "video_generation_Runpod_hub",
+    "description": "Advanced AI model for generating high-quality videos from images with natural motion and realistic animations. Converts static images into dynamic videos using state-of-the-art image-to-video technology.",
+    "type": "serverless",
+    "category": "video",
+    "iconUrl": "https://example.com/icon.png",
+  
+    "config": {
+      "runsOn": "GPU",
+      "containerDiskInGb": 180,
+  
+      "gpuCount": 1,
+      "gpuIds": "ADA_24,ADA_32_PRO",
+      "allowedCudaVersions": [
+        "12.9", "12.8"
+      ]
+    }
+}

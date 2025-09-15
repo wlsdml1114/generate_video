@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "test_case_name",
+      "input": {
+          "image_path": "/example_image.png",
+          "prompt": "A majestic cat sitting on a throne, cinematic lighting",
+          "seed": 12345,
+          "width": 1024,
+          "height": 1024
+        },
+      "timeout": 10000
+    }
+  ],
+  "config": {
+    "gpuTypeId": "NVIDIA GeForce RTX 4090",
+    "gpuCount": 1,
+    "allowedCudaVersions": [
+      "12.8", "12.9"
+    ]
+  }
+}
+  
