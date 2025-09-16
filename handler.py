@@ -106,13 +106,28 @@ def handler(job):
     logger.info(f"Received job input: {job_input}")
     task_id = f"task_{uuid.uuid4()}"
 
-    image_input = job_input["image_path"]
+    # image_input = job_input["image_path"]
+    
+    image_path_input = job_input.get("image_path")
+    image_base64_input = job_input.get("image_base64")
     # 헬퍼 함수를 사용해 이미지 파일 경로 확보 (Base64 또는 Path)
     # 이미지 확장자를 알 수 없으므로 .jpg로 가정하거나, 입력에서 받아야 합니다.
-    if image_input == "/example_image.png":
-        image_path = "/example_image.png"
+    if image_path_input:
+        if image_path_input == "/example_image.png":
+            image_path = "/example_image.png"
+        else:
+            image_path = image_path_input
     else:
-        image_path = save_data_if_base64(image_input, task_id, "input_image.jpg")
+        # Base64인 경우 디코딩하여 저장
+        try:
+            os.makedirs(task_id, exist_ok=True)
+            image_path = os.path.join(task_id, "input_image.jpg")
+            decoded_data = base64.b64decode(image_base64_input)
+            with open(image_path, 'wb') as f:
+                f.write(decoded_data)
+            logger.info(f"Base64 비디오를 '{image_path}' 파일로 저장했습니다.")
+        except Exception as e:
+            return {"error": f"Base64 이미지 디코딩 실패: {e}"}
     
     # LoRA 설정 확인 - 배열로 받아서 처리
     lora_pairs = job_input.get("lora_pairs", [])
