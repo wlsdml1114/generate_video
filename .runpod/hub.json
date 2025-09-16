@@ -1,9 +1,9 @@
 {
-    "title": "video_generation",
-    "description": "video generation",
+    "title": "Wan2.2 with LoRA",
+    "description": "Advanced AI model for generating high-quality videos from images with natural motion and realistic animations. you can use at most 3 LoRA pairs",
     "type": "serverless",
     "category": "video",
-    "iconUrl": "https://example.com/icon.png",
+    "iconUrl": "https://github.com/wlsdml1114/Engui_Studio/blob/main/assets/logo.png?raw=true",
   
     "config": {
       "runsOn": "GPU",
