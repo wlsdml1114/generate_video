@@ -1,6 +1,6 @@
 {
-    "title": "video_generation_Runpod_hub",
-    "description": "Advanced AI model for generating high-quality videos from images with natural motion and realistic animations. Converts static images into dynamic videos using state-of-the-art image-to-video technology.",
+    "title": "video_generation",
+    "description": "video generation",
     "type": "serverless",
     "category": "video",
     "iconUrl": "https://example.com/icon.png",
