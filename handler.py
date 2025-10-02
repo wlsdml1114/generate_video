@@ -1,14 +1,19 @@
-import runpod
-from runpod.serverless.utils import rp_upload
-import os
-import websocket
 import base64
+import binascii  # Base64 에러 처리를 위해 import
 import json
-import uuid
 import logging
-import urllib.request
+import os
+import time
+import uuid
+from io import BytesIO
+
+import websocket
 import urllib.parse
-import binascii # Base64 에러 처리를 위해 import
+import urllib.request
+from PIL import Image, UnidentifiedImageError
+
+import runpod
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,36 +21,162 @@ logger = logging.getLogger(__name__)
 
 server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
-def save_data_if_base64(data_input, temp_dir, output_filename):
-    """
-    입력 데이터가 Base64 문자열인지 확인하고, 맞다면 파일로 저장 후 경로를 반환합니다.
-    만약 일반 경로 문자열이라면 그대로 반환합니다.
-    """
-    # 입력값이 문자열이 아니면 그대로 반환
-    if not isinstance(data_input, str):
-        return data_input
+_comfy_input_dir_env = os.getenv("COMFY_INPUT_DIR")
+DEFAULT_IMAGE_PATH = os.getenv("DEFAULT_IMAGE_PATH", "/example_image.png")
+RUNPOD_VOLUME_MOUNT = os.getenv("RUNPOD_VOLUME_MOUNT", "/runpod-volume")
 
+
+def _determine_comfy_input_dir() -> str:
+    candidates = []
+    if _comfy_input_dir_env:
+        candidates.append(_comfy_input_dir_env)
+    candidates.extend([
+        "/ComfyUI/input",
+        "/workspace/ComfyUI/input",
+    ])
+
+    seen = []
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.append(candidate)
+        abs_candidate = os.path.abspath(candidate)
+        if os.path.isdir(abs_candidate):
+            logger.info(f"ComfyUI input 디렉터리를 사용합니다: {abs_candidate}")
+            return abs_candidate
+
+    for candidate in seen:
+        abs_candidate = os.path.abspath(candidate)
+        try:
+            os.makedirs(abs_candidate, exist_ok=True)
+            logger.info(f"ComfyUI input 디렉터리를 생성했습니다: {abs_candidate}")
+            return abs_candidate
+        except OSError as exc:
+            logger.warning(f"ComfyUI input 디렉터리를 생성하지 못했습니다: {abs_candidate} ({exc})")
+
+    raise RuntimeError("ComfyUI input 디렉터리를 찾거나 생성할 수 없습니다.")
+
+
+COMFY_INPUT_DIR = _determine_comfy_input_dir()
+
+
+def _strip_base64_header(image_data: str) -> str:
+    if not isinstance(image_data, str) or not image_data.strip():
+        raise ValueError("Base64 이미지 데이터가 비어 있습니다.")
+    cleaned = image_data.strip()
+    if cleaned.startswith("data:"):
+        header, _, payload = cleaned.partition(",")
+        if not payload:
+            raise ValueError("Base64 이미지 데이터 형식이 올바르지 않습니다.")
+        cleaned = payload
+    return cleaned
+
+
+def _resolve_image_path(path_input: str) -> str:
+    if not isinstance(path_input, str) or not path_input.strip():
+        raise FileNotFoundError("이미지 경로가 비어 있습니다.")
+
+    normalized = os.path.expanduser(path_input.strip())
+
+    candidates = []
+
+    def _add_candidate(candidate):
+        candidate = os.path.abspath(candidate)
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    _add_candidate(normalized)
+
+    sanitized = normalized.lstrip("/")
+    if sanitized:
+        _add_candidate(os.path.join(os.getcwd(), sanitized))
+        _add_candidate(os.path.join(RUNPOD_VOLUME_MOUNT, sanitized))
+
+    if not os.path.isabs(normalized):
+        _add_candidate(os.path.join(os.getcwd(), normalized))
+        _add_candidate(os.path.join(RUNPOD_VOLUME_MOUNT, normalized))
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    raise FileNotFoundError(normalized)
+
+def _normalise_image_mode(image: Image.Image) -> Image.Image:
+    mode = image.mode
+    if mode in ("RGB", "RGBA", "L"):
+        return image
+    if mode in ("LA",):
+        return image.convert("RGBA")
+    if mode in ("CMYK", "YCbCr", "P", "HSV", "I", "I;16", "F"):
+        return image.convert("RGB")
     try:
-        # Base64 문자열은 디코딩을 시도하면 성공합니다.
-        decoded_data = base64.b64decode(data_input)
-        
-        # 디렉토리가 존재하지 않으면 생성
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        # 디코딩에 성공하면, 임시 파일로 저장합니다.
-        file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
-        with open(file_path, 'wb') as f: # 바이너리 쓰기 모드('wb')로 저장
-            f.write(decoded_data)
-        
-        # 저장된 파일의 경로를 반환합니다.
-        print(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
-        return file_path
+        return image.convert("RGB")
+    except Exception:
+        return image
 
-    except (binascii.Error, ValueError):
-        # 디코딩에 실패하면, 일반 경로로 간주하고 원래 값을 그대로 반환합니다.
-        print(f"➡️ '{data_input}'은(는) 파일 경로로 처리합니다.")
-        return data_input
-    
+
+def _write_image_to_comfy(image_bytes: bytes, task_id: str) -> str:
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.load()
+            image = _normalise_image_mode(image)
+            os.makedirs(COMFY_INPUT_DIR, exist_ok=True)
+            dest_name = f"{task_id}.png"
+            dest_path = os.path.join(COMFY_INPUT_DIR, dest_name)
+            image.save(dest_path, format="PNG")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("유효하지 않은 이미지 데이터입니다.") from exc
+
+    logger.info(f"이미지를 ComfyUI input 디렉터리에 저장했습니다: {dest_path}")
+    return dest_name
+
+
+def _copy_into_comfy_input(image_path: str, task_id: str) -> str:
+    with open(image_path, "rb") as source_file:
+        image_bytes = source_file.read()
+    return _write_image_to_comfy(image_bytes, task_id)
+
+
+def _save_base64_image(image_data: str, task_id: str) -> str:
+    cleaned = _strip_base64_header(image_data)
+    try:
+        image_bytes = base64.b64decode(cleaned, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Base64 이미지 디코딩 실패") from exc
+
+    return _write_image_to_comfy(image_bytes, task_id)
+
+
+def prepare_image_asset(job_input: dict, task_id: str) -> str:
+    image_base64_input = job_input.get("image_base64")
+    image_path_input = job_input.get("image_path")
+
+    if image_base64_input:
+        return _save_base64_image(image_base64_input, task_id)
+
+    path_to_use = image_path_input or DEFAULT_IMAGE_PATH
+    resolved_path = _resolve_image_path(path_to_use)
+    return _copy_into_comfy_input(resolved_path, task_id)
+
+
+def _read_output_entry(media_entry: dict) -> bytes:
+    fullpath = media_entry.get("fullpath")
+    if fullpath and os.path.exists(fullpath):
+        with open(fullpath, "rb") as output_file:
+            return output_file.read()
+
+    filename = media_entry.get("filename")
+    if filename:
+        subfolder = media_entry.get("subfolder", "")
+        folder_type = media_entry.get("type", "output")
+        try:
+            return get_image(filename, subfolder, folder_type)
+        except Exception as exc:
+            logger.warning(f"출력 파일을 HTTP로 읽는 데 실패했습니다: {filename} ({exc})")
+
+    raise FileNotFoundError(fullpath or filename or "output entry")
+
 def queue_prompt(prompt):
     url = f"http://{server_address}:8188/prompt"
     logger.info(f"Queueing prompt to: {url}")
@@ -83,15 +214,19 @@ def get_videos(ws, prompt):
             continue
 
     history = get_history(prompt_id)[prompt_id]
-    for node_id in history['outputs']:
-        node_output = history['outputs'][node_id]
+    for node_id, node_output in history['outputs'].items():
         videos_output = []
-        if 'gifs' in node_output:
-            for video in node_output['gifs']:
-                # fullpath를 이용하여 직접 파일을 읽고 base64로 인코딩
-                with open(video['fullpath'], 'rb') as f:
-                    video_data = base64.b64encode(f.read()).decode('utf-8')
-                videos_output.append(video_data)
+        for media_key in ("gifs", "videos"):
+            media_entries = node_output.get(media_key)
+            if not media_entries:
+                continue
+            for media_entry in media_entries:
+                try:
+                    media_bytes = _read_output_entry(media_entry)
+                    video_data = base64.b64encode(media_bytes).decode('utf-8')
+                    videos_output.append(video_data)
+                except Exception as exc:
+                    logger.warning(f"출력 미디어를 처리하는 중 오류 발생 ({media_key}): {exc}")
         output_videos[node_id] = videos_output
 
     return output_videos
@@ -106,28 +241,17 @@ def handler(job):
     logger.info(f"Received job input: {job_input}")
     task_id = f"task_{uuid.uuid4()}"
 
-    # image_input = job_input["image_path"]
-    
-    image_path_input = job_input.get("image_path")
-    image_base64_input = job_input.get("image_base64")
-    # 헬퍼 함수를 사용해 이미지 파일 경로 확보 (Base64 또는 Path)
-    # 이미지 확장자를 알 수 없으므로 .jpg로 가정하거나, 입력에서 받아야 합니다.
-    if image_path_input:
-        if image_path_input == "/example_image.png":
-            image_path = "/example_image.png"
-        else:
-            image_path = image_path_input
-    else:
-        # Base64인 경우 디코딩하여 저장
-        try:
-            os.makedirs(task_id, exist_ok=True)
-            image_path = os.path.join(task_id, "input_image.jpg")
-            decoded_data = base64.b64decode(image_base64_input)
-            with open(image_path, 'wb') as f:
-                f.write(decoded_data)
-            logger.info(f"Base64 비디오를 '{image_path}' 파일로 저장했습니다.")
-        except Exception as e:
-            return {"error": f"Base64 이미지 디코딩 실패: {e}"}
+    try:
+        image_filename = prepare_image_asset(job_input, task_id)
+    except FileNotFoundError as exc:
+        logger.error(f"이미지 파일을 찾을 수 없습니다: {exc}")
+        return {"error": f"이미지 파일을 찾을 수 없습니다: {exc}"}
+    except ValueError as exc:
+        logger.error(f"유효하지 않은 이미지 입력입니다: {exc}")
+        return {"error": str(exc)}
+    except Exception as exc:
+        logger.exception("이미지를 준비하는 중 예기치 못한 오류가 발생했습니다.")
+        return {"error": f"이미지를 준비하는 중 오류가 발생했습니다: {exc}"}
     
     # LoRA 설정 확인 - 배열로 받아서 처리
     lora_pairs = job_input.get("lora_pairs", [])
@@ -157,7 +281,7 @@ def handler(job):
     length = job_input.get("length", 81)
     steps = job_input.get("steps", 10)
 
-    prompt["260"]["inputs"]["image"] = image_path
+    prompt["260"]["inputs"]["image"] = image_filename
     prompt["846"]["inputs"]["value"] = length
     prompt["246"]["inputs"]["value"] = job_input["prompt"]
     prompt["835"]["inputs"]["noise_seed"] = job_input["seed"]
@@ -241,7 +365,6 @@ def handler(job):
     # 웹소켓 연결 시도 (최대 3분)
     max_attempts = int(180/5)  # 3분 (1초에 한 번씩 시도)
     for attempt in range(max_attempts):
-        import time
         try:
             ws.connect(ws_url)
             logger.info(f"웹소켓 연결 성공 (시도 {attempt+1})")
