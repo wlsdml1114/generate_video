@@ -27,16 +27,17 @@ This template includes all the necessary components to run Wan22 as a RunPod Ser
 *   **Dockerfile**: Configures the environment and installs all dependencies required for model execution.
 *   **handler.py**: Implements the handler function that processes requests for RunPod Serverless.
 *   **entrypoint.sh**: Performs initialization tasks when the worker starts.
-*   **wan22.json**: Workflow configuration for image-to-video generation.
+*   **new_Wan22_api.json**: Single workflow file supporting up to 4 LoRA pairs for image-to-video generation.
 
 ### Input
 
-The `input` object must contain the following fields. Images can be input using **path or Base64** - one method for each.
+The `input` object must contain the following fields. Images can be input using **path, URL or Base64** - one method for each.
 
 #### Image Input (use only one)
 | Parameter | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `image_path` | `string` | No | `/example_image.png` | Local path to the input image |
+| `image_url` | `string` | No | `/example_image.png` | URL of the input image |
 | `image_base64` | `string` | No | `/example_image.png` | Base64 encoded string of the input image |
 
 #### LoRA Configuration
@@ -64,6 +65,7 @@ The `input` object must contain the following fields. Images can be input using 
 | `height` | `integer` | Yes | - | Height of the output video in pixels |
 | `length` | `integer` | No | `81` | Length of the generated video |
 | `steps` | `integer` | No | `10` | Number of denoising steps |
+| `context_overlap` | `integer` | No | `48` | Context overlap value |
 
 **Request Examples:**
 
@@ -105,7 +107,7 @@ The `input` object must contain the following fields. Images can be input using 
 }
 ```
 
-#### 3. Multiple LoRA Pairs (up to 3)
+#### 3. Multiple LoRA Pairs (up to 4)
 ```json
 {
   "input": {
@@ -129,6 +131,21 @@ The `input` object must contain the following fields. Images can be input using 
         "low_weight": 0.7
       }
     ]
+  }
+}
+```
+
+#### 4. URL Image Input
+```json
+{
+  "input": {
+    "prompt": "A person walking in a natural way.",
+    "image_url": "https://example.com/image.jpg",
+    "seed": 12345,
+    "cfg": 7.5,
+    "width": 512,
+    "height": 512,
+    "context_overlap": 32
   }
 }
 ```
@@ -187,29 +204,15 @@ Instead of directly transmitting Base64 encoded files, you can use RunPod's Netw
 
 ## 🔧 Workflow Configuration
 
-This template includes multiple workflow configurations that are automatically selected based on the number of LoRA pairs:
+This template uses a single workflow configuration:
 
-*   **wan22_nolora.json**: Image-to-video generation workflow without LoRA
-*   **wan22_1lora.json**: Image-to-video generation workflow with 1 LoRA pair
-*   **wan22_2lora.json**: Image-to-video generation workflow with 2 LoRA pairs
-*   **wan22_3lora.json**: Image-to-video generation workflow with 3 LoRA pairs
+*   **new_Wan22_api.json**: Image-to-video generation workflow (supports up to 4 LoRA pairs)
 
-### Workflow Selection Logic
-
-The handler automatically selects the appropriate workflow based on the number of LoRA pairs:
-
-| LoRA Pairs Count | Selected Workflow |
-|------------------|-------------------|
-| 0 | wan22_nolora.json |
-| 1 | wan22_1lora.json |
-| 2 | wan22_2lora.json |
-| 3 | wan22_3lora.json |
-
-The workflows are based on ComfyUI and include all necessary nodes for Wan22 processing, including:
+The workflow is based on ComfyUI and includes all necessary nodes for Wan22 processing:
 - CLIP text encoding for prompts
 - VAE loading and processing
 - WanImageToVideo node for video generation
-- LoRA loading and application nodes (when applicable)
+- LoRA loading and application nodes (WanVideoLoraSelectMulti)
 - Image concatenation and processing nodes
 
 ## 🙏 Original Project

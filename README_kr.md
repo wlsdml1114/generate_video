@@ -27,19 +27,17 @@ Wan22는 정적 이미지를 자연스러운 움직임과 사실적인 애니메
 *   **Dockerfile**: 모델 실행에 필요한 환경을 구성하고 모든 의존성을 설치합니다.
 *   **handler.py**: RunPod Serverless용 요청을 처리하는 핸들러 함수를 구현합니다.
 *   **entrypoint.sh**: Worker가 시작될 때 초기화 작업을 수행합니다.
-*   **wan22_nolora.json**: LoRA 없이 이미지-투-비디오 생성을 위한 워크플로우
-*   **wan22_1lora.json**: 1개 LoRA 쌍으로 이미지-투-비디오 생성을 위한 워크플로우
-*   **wan22_2lora.json**: 2개 LoRA 쌍으로 이미지-투-비디오 생성을 위한 워크플로우
-*   **wan22_3lora.json**: 3개 LoRA 쌍으로 이미지-투-비디오 생성을 위한 워크플로우
+*   **new_Wan22_api.json**: 단일 워크플로우 파일로 최대 4개 LoRA 쌍까지 지원하는 이미지-투-비디오 생성 워크플로우
 
 ### 입력
 
-`input` 객체는 다음 필드를 포함해야 합니다. 이미지는 **경로 또는 Base64** 중 하나의 방법으로 입력할 수 있습니다.
+`input` 객체는 다음 필드를 포함해야 합니다. 이미지는 **경로, URL 또는 Base64** 중 하나의 방법으로 입력할 수 있습니다.
 
 #### 이미지 입력 (하나만 사용)
 | 매개변수 | 타입 | 필수 | 기본값 | 설명 |
 | --- | --- | --- | --- | --- |
 | `image_path` | `string` | 아니오 | `/example_image.png` | 입력 이미지의 로컬 경로 |
+| `image_url` | `string` | 아니오 | `/example_image.png` | 입력 이미지의 URL |
 | `image_base64` | `string` | 아니오 | `/example_image.png` | 입력 이미지의 Base64 인코딩된 문자열 |
 
 #### LoRA 설정
@@ -67,6 +65,7 @@ Wan22는 정적 이미지를 자연스러운 움직임과 사실적인 애니메
 | `height` | `integer` | 예 | - | 출력 비디오의 픽셀 단위 높이 |
 | `length` | `integer` | 아니오 | `81` | 생성할 비디오의 길이 |
 | `steps` | `integer` | 아니오 | `10` | 디노이징 스텝 수 |
+| `context_overlap` | `integer` | 아니오 | `48` | 컨텍스트 오버랩 값 |
 
 **요청 예시:**
 
@@ -108,7 +107,7 @@ Wan22는 정적 이미지를 자연스러운 움직임과 사실적인 애니메
 }
 ```
 
-#### 3. 여러 LoRA 쌍 (최대 3개)
+#### 3. 여러 LoRA 쌍 (최대 4개)
 ```json
 {
   "input": {
@@ -132,6 +131,21 @@ Wan22는 정적 이미지를 자연스러운 움직임과 사실적인 애니메
         "low_weight": 0.7
       }
     ]
+  }
+}
+```
+
+#### 4. URL 이미지 입력
+```json
+{
+  "input": {
+    "prompt": "사람이 자연스럽게 걷는 모습.",
+    "image_url": "https://example.com/image.jpg",
+    "seed": 12345,
+    "cfg": 7.5,
+    "width": 512,
+    "height": 512,
+    "context_overlap": 32
   }
 }
 ```
@@ -190,14 +204,15 @@ Base64로 인코딩된 파일을 직접 전송하는 대신 RunPod의 Network Vo
 
 ## 🔧 워크플로우 구성
 
-이 템플릿은 다음 워크플로우 구성을 포함합니다:
+이 템플릿은 단일 워크플로우 구성을 사용합니다:
 
-*   **wan22.json**: 이미지-투-비디오 생성 워크플로우
+*   **new_Wan22_api.json**: 이미지-투-비디오 생성 워크플로우 (최대 4개 LoRA 쌍 지원)
 
 워크플로우는 ComfyUI를 기반으로 하며 Wan22 처리를 위한 모든 필요한 노드를 포함합니다:
 - 프롬프트를 위한 CLIP 텍스트 인코딩
 - VAE 로딩 및 처리
 - 비디오 생성을 위한 WanImageToVideo 노드
+- LoRA 로딩 및 적용 노드 (WanVideoLoraSelectMulti)
 - 이미지 연결 및 처리 노드
 
 ## 🙏 원본 프로젝트

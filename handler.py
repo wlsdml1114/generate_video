@@ -9,6 +9,8 @@ import logging
 import urllib.request
 import urllib.parse
 import binascii # Base64 에러 처리를 위해 import
+import subprocess
+import time
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,35 +18,67 @@ logger = logging.getLogger(__name__)
 
 server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
-def save_data_if_base64(data_input, temp_dir, output_filename):
-    """
-    입력 데이터가 Base64 문자열인지 확인하고, 맞다면 파일로 저장 후 경로를 반환합니다.
-    만약 일반 경로 문자열이라면 그대로 반환합니다.
-    """
-    # 입력값이 문자열이 아니면 그대로 반환
-    if not isinstance(data_input, str):
-        return data_input
+def process_input(input_data, temp_dir, output_filename, input_type):
+    """입력 데이터를 처리하여 파일 경로를 반환하는 함수"""
+    if input_type == "path":
+        # 경로인 경우 그대로 반환
+        logger.info(f"📁 경로 입력 처리: {input_data}")
+        return input_data
+    elif input_type == "url":
+        # URL인 경우 다운로드
+        logger.info(f"🌐 URL 입력 처리: {input_data}")
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
+        return download_file_from_url(input_data, file_path)
+    elif input_type == "base64":
+        # Base64인 경우 디코딩하여 저장
+        logger.info(f"🔢 Base64 입력 처리")
+        return save_base64_to_file(input_data, temp_dir, output_filename)
+    else:
+        raise Exception(f"지원하지 않는 입력 타입: {input_type}")
 
+        
+def download_file_from_url(url, output_path):
+    """URL에서 파일을 다운로드하는 함수"""
     try:
-        # Base64 문자열은 디코딩을 시도하면 성공합니다.
-        decoded_data = base64.b64decode(data_input)
+        # wget을 사용하여 파일 다운로드
+        result = subprocess.run([
+            'wget', '-O', output_path, '--no-verbose', url
+        ], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ URL에서 파일을 성공적으로 다운로드했습니다: {url} -> {output_path}")
+            return output_path
+        else:
+            logger.error(f"❌ wget 다운로드 실패: {result.stderr}")
+            raise Exception(f"URL 다운로드 실패: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        logger.error("❌ 다운로드 시간 초과")
+        raise Exception("다운로드 시간 초과")
+    except Exception as e:
+        logger.error(f"❌ 다운로드 중 오류 발생: {e}")
+        raise Exception(f"다운로드 중 오류 발생: {e}")
+
+
+def save_base64_to_file(base64_data, temp_dir, output_filename):
+    """Base64 데이터를 파일로 저장하는 함수"""
+    try:
+        # Base64 문자열 디코딩
+        decoded_data = base64.b64decode(base64_data)
         
         # 디렉토리가 존재하지 않으면 생성
         os.makedirs(temp_dir, exist_ok=True)
         
-        # 디코딩에 성공하면, 임시 파일로 저장합니다.
+        # 파일로 저장
         file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
-        with open(file_path, 'wb') as f: # 바이너리 쓰기 모드('wb')로 저장
+        with open(file_path, 'wb') as f:
             f.write(decoded_data)
         
-        # 저장된 파일의 경로를 반환합니다.
-        print(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
+        logger.info(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
         return file_path
-
-    except (binascii.Error, ValueError):
-        # 디코딩에 실패하면, 일반 경로로 간주하고 원래 값을 그대로 반환합니다.
-        print(f"➡️ '{data_input}'은(는) 파일 경로로 처리합니다.")
-        return data_input
+    except (binascii.Error, ValueError) as e:
+        logger.error(f"❌ Base64 디코딩 실패: {e}")
+        raise Exception(f"Base64 디코딩 실패: {e}")
     
 def queue_prompt(prompt):
     url = f"http://{server_address}:8188/prompt"
@@ -106,64 +140,46 @@ def handler(job):
     logger.info(f"Received job input: {job_input}")
     task_id = f"task_{uuid.uuid4()}"
 
-    # image_input = job_input["image_path"]
-    
-    image_path_input = job_input.get("image_path")
-    image_base64_input = job_input.get("image_base64")
-    # 헬퍼 함수를 사용해 이미지 파일 경로 확보 (Base64 또는 Path)
-    # 이미지 확장자를 알 수 없으므로 .jpg로 가정하거나, 입력에서 받아야 합니다.
-    if image_path_input:
-        if image_path_input == "/example_image.png":
-            image_path = "/example_image.png"
-        else:
-            image_path = image_path_input
+    # 이미지 입력 처리 (image_path, image_url, image_base64 중 하나만 사용)
+    image_path = None
+    if "image_path" in job_input:
+        image_path = process_input(job_input["image_path"], task_id, "input_image.jpg", "path")
+    elif "image_url" in job_input:
+        image_path = process_input(job_input["image_url"], task_id, "input_image.jpg", "url")
+    elif "image_base64" in job_input:
+        image_path = process_input(job_input["image_base64"], task_id, "input_image.jpg", "base64")
     else:
-        # Base64인 경우 디코딩하여 저장
-        try:
-            os.makedirs(task_id, exist_ok=True)
-            image_path = os.path.join(task_id, "input_image.jpg")
-            decoded_data = base64.b64decode(image_base64_input)
-            with open(image_path, 'wb') as f:
-                f.write(decoded_data)
-            logger.info(f"Base64 비디오를 '{image_path}' 파일로 저장했습니다.")
-        except Exception as e:
-            return {"error": f"Base64 이미지 디코딩 실패: {e}"}
+        # 기본값 사용
+        image_path = "/example_image.png"
+        logger.info("기본 이미지 파일을 사용합니다: /example_image.png")
     
     # LoRA 설정 확인 - 배열로 받아서 처리
     lora_pairs = job_input.get("lora_pairs", [])
     
-    # LoRA 개수에 따라 적절한 워크플로우 파일 선택
-    lora_count = len(lora_pairs)
-    if lora_count == 0:
-        workflow_file = "/wan22_nolora.json"
-        logger.info("Using no LoRA workflow")
-    elif lora_count == 1:
-        workflow_file = "/wan22_1lora.json"
-        logger.info("Using 1 LoRA pair workflow")
-    elif lora_count == 2:
-        workflow_file = "/wan22_2lora.json"
-        logger.info("Using 2 LoRA pairs workflow")
-    elif lora_count == 3:
-        workflow_file = "/wan22_3lora.json"
-        logger.info("Using 3 LoRA pairs workflow")
-    else:
-        logger.warning(f"LoRA 개수가 {lora_count}개입니다. 최대 3개까지만 지원됩니다. 3개로 제한합니다.")
-        lora_count = 3
-        workflow_file = "/wan22_3lora.json"
-        lora_pairs = lora_pairs[:3]  # 처음 3개만 사용
+    # 최대 4개 LoRA까지 지원
+    lora_count = min(len(lora_pairs), 4)
+    if lora_count > len(lora_pairs):
+        logger.warning(f"LoRA 개수가 {len(lora_pairs)}개입니다. 최대 4개까지만 지원됩니다. 처음 4개만 사용합니다.")
+        lora_pairs = lora_pairs[:4]
+    
+    # 단일 워크플로우 파일 사용
+    workflow_file = "/new_Wan22_api.json"
+    logger.info(f"Using single workflow with {lora_count} LoRA pairs")
     
     prompt = load_workflow(workflow_file)
     
     length = job_input.get("length", 81)
     steps = job_input.get("steps", 10)
 
-    prompt["260"]["inputs"]["image"] = image_path
-    prompt["846"]["inputs"]["value"] = length
-    prompt["246"]["inputs"]["value"] = job_input["prompt"]
-    prompt["835"]["inputs"]["noise_seed"] = job_input["seed"]
-    prompt["830"]["inputs"]["cfg"] = job_input["cfg"]
-    prompt["849"]["inputs"]["value"] = job_input["width"]
-    prompt["848"]["inputs"]["value"] = job_input["height"]
+    prompt["244"]["inputs"]["image"] = image_path
+    prompt["541"]["inputs"]["num_frames"] = length
+    prompt["135"]["inputs"]["positive_prompt"] = job_input["prompt"]
+    prompt["220"]["inputs"]["seed"] = job_input["seed"]
+    prompt["540"]["inputs"]["seed"] = job_input["seed"]
+    prompt["540"]["inputs"]["cfg"] = job_input["cfg"]
+    prompt["235"]["inputs"]["value"] = job_input["width"]
+    prompt["236"]["inputs"]["value"] = job_input["height"]
+    prompt["498"]["inputs"]["context_overlap"] = job_input.get("context_overlap", 48)
     
     # step 설정 적용
     if "834" in prompt:
@@ -173,48 +189,33 @@ def handler(job):
         prompt["829"]["inputs"]["step"] = lowsteps
         logger.info(f"LowSteps set to: {lowsteps}")
     
-    # LoRA 설정 적용
+    # LoRA 설정 적용 - HIGH LoRA는 노드 279, LOW LoRA는 노드 553
     if lora_count > 0:
-        # LoRA 노드 ID 매핑 (각 워크플로우에서 LoRA 노드 ID가 다름)
-        lora_node_mapping = {
-            1: {
-                "high": ["282"],
-                "low": ["286"]
-            },
-            2: {
-                "high": ["282", "339"],
-                "low": ["286", "337"]
-            },
-            3: {
-                "high": ["282", "339", "340"],
-                "low": ["286", "337", "338"]
-            }
-        }
+        # HIGH LoRA 노드 (279번)
+        high_lora_node_id = "279"
         
-        current_mapping = lora_node_mapping[lora_count]
+        # LOW LoRA 노드 (553번)
+        low_lora_node_id = "553"
         
+        # 입력받은 LoRA pairs 적용 (lora_1부터 시작)
         for i, lora_pair in enumerate(lora_pairs):
-            if i < lora_count:
+            if i < 4:  # 최대 4개까지만
                 lora_high = lora_pair.get("high")
                 lora_low = lora_pair.get("low")
                 lora_high_weight = lora_pair.get("high_weight", 1.0)
                 lora_low_weight = lora_pair.get("low_weight", 1.0)
                 
-                # HIGH LoRA 설정
-                if i < len(current_mapping["high"]):
-                    high_node_id = current_mapping["high"][i]
-                    if high_node_id in prompt and lora_high:
-                        prompt[high_node_id]["inputs"]["lora_name"] = lora_high
-                        prompt[high_node_id]["inputs"]["strength_model"] = lora_high_weight
-                        logger.info(f"LoRA {i+1} HIGH applied: {lora_high} with weight {lora_high_weight}")
+                # HIGH LoRA 설정 (노드 279번, lora_1부터 시작)
+                if lora_high:
+                    prompt[high_lora_node_id]["inputs"][f"lora_{i+1}"] = lora_high
+                    prompt[high_lora_node_id]["inputs"][f"strength_{i+1}"] = lora_high_weight
+                    logger.info(f"LoRA {i+1} HIGH applied to node 279: {lora_high} with weight {lora_high_weight}")
                 
-                # LOW LoRA 설정
-                if i < len(current_mapping["low"]):
-                    low_node_id = current_mapping["low"][i]
-                    if low_node_id in prompt and lora_low:
-                        prompt[low_node_id]["inputs"]["lora_name"] = lora_low
-                        prompt[low_node_id]["inputs"]["strength_model"] = lora_low_weight
-                        logger.info(f"LoRA {i+1} LOW applied: {lora_low} with weight {lora_low_weight}")
+                # LOW LoRA 설정 (노드 553번, lora_1부터 시작)
+                if lora_low:
+                    prompt[low_lora_node_id]["inputs"][f"lora_{i+1}"] = lora_low
+                    prompt[low_lora_node_id]["inputs"][f"strength_{i+1}"] = lora_low_weight
+                    logger.info(f"LoRA {i+1} LOW applied to node 553: {lora_low} with weight {lora_low_weight}")
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
     logger.info(f"Connecting to WebSocket: {ws_url}")
