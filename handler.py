@@ -18,6 +18,16 @@ logger = logging.getLogger(__name__)
 
 server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
+def to_nearest_multiple_of_16(value):
+    """주어진 값을 가장 가까운 16의 배수로 보정, 최소 16 보장"""
+    try:
+        numeric_value = float(value)
+    except Exception:
+        raise Exception(f"width/height 값이 숫자가 아닙니다: {value}")
+    adjusted = int(round(numeric_value / 16.0) * 16)
+    if adjusted < 16:
+        adjusted = 16
+    return adjusted
 def process_input(input_data, temp_dir, output_filename, input_type):
     """입력 데이터를 처리하여 파일 경로를 반환하는 함수"""
     if input_type == "path":
@@ -152,6 +162,15 @@ def handler(job):
         # 기본값 사용
         image_path = "/example_image.png"
         logger.info("기본 이미지 파일을 사용합니다: /example_image.png")
+
+    # 엔드 이미지 입력 처리 (end_image_path, end_image_url, end_image_base64 중 하나만 사용)
+    end_image_path_local = None
+    if "end_image_path" in job_input:
+        end_image_path_local = process_input(job_input["end_image_path"], task_id, "end_image.jpg", "path")
+    elif "end_image_url" in job_input:
+        end_image_path_local = process_input(job_input["end_image_url"], task_id, "end_image.jpg", "url")
+    elif "end_image_base64" in job_input:
+        end_image_path_local = process_input(job_input["end_image_base64"], task_id, "end_image.jpg", "base64")
     
     # LoRA 설정 확인 - 배열로 받아서 처리
     lora_pairs = job_input.get("lora_pairs", [])
@@ -162,9 +181,9 @@ def handler(job):
         logger.warning(f"LoRA 개수가 {len(lora_pairs)}개입니다. 최대 4개까지만 지원됩니다. 처음 4개만 사용합니다.")
         lora_pairs = lora_pairs[:4]
     
-    # 단일 워크플로우 파일 사용
-    workflow_file = "/new_Wan22_api.json"
-    logger.info(f"Using single workflow with {lora_count} LoRA pairs")
+    # 워크플로우 파일 선택 (end_image_*가 있으면 FLF2V 워크플로 사용)
+    workflow_file = "/new_Wan22_flf2v_api.json" if end_image_path_local else "/new_Wan22_api.json"
+    logger.info(f"Using {'FLF2V' if end_image_path_local else 'single'} workflow with {lora_count} LoRA pairs")
     
     prompt = load_workflow(workflow_file)
     
@@ -177,8 +196,17 @@ def handler(job):
     prompt["220"]["inputs"]["seed"] = job_input["seed"]
     prompt["540"]["inputs"]["seed"] = job_input["seed"]
     prompt["540"]["inputs"]["cfg"] = job_input["cfg"]
-    prompt["235"]["inputs"]["value"] = job_input["width"]
-    prompt["236"]["inputs"]["value"] = job_input["height"]
+    # 해상도(폭/높이) 16배수 보정
+    original_width = job_input["width"]
+    original_height = job_input["height"]
+    adjusted_width = to_nearest_multiple_of_16(original_width)
+    adjusted_height = to_nearest_multiple_of_16(original_height)
+    if adjusted_width != original_width:
+        logger.info(f"Width adjusted to nearest multiple of 16: {original_width} -> {adjusted_width}")
+    if adjusted_height != original_height:
+        logger.info(f"Height adjusted to nearest multiple of 16: {original_height} -> {adjusted_height}")
+    prompt["235"]["inputs"]["value"] = adjusted_width
+    prompt["236"]["inputs"]["value"] = adjusted_height
     prompt["498"]["inputs"]["context_overlap"] = job_input.get("context_overlap", 48)
     
     # step 설정 적용
@@ -188,6 +216,10 @@ def handler(job):
         lowsteps = int(steps*0.6)
         prompt["829"]["inputs"]["step"] = lowsteps
         logger.info(f"LowSteps set to: {lowsteps}")
+
+    # 엔드 이미지가 있는 경우 617번 노드에 경로 적용 (FLF2V 전용)
+    if end_image_path_local:
+        prompt["617"]["inputs"]["image"] = end_image_path_local
     
     # LoRA 설정 적용 - HIGH LoRA는 노드 279, LOW LoRA는 노드 553
     if lora_count > 0:
