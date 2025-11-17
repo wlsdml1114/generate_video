@@ -205,6 +205,7 @@ class GenerateVideoClient:
         self,
         image_path: str,
         prompt: str = "running man, grab the gun",
+        negative_prompt: Optional[str] = None,
         width: int = 480,
         height: int = 832,
         length: int = 81,
@@ -220,6 +221,7 @@ class GenerateVideoClient:
         Args:
             image_path: Image file path
             prompt: Prompt text
+            negative_prompt: Negative prompt to exclude unwanted elements
             width: Output width
             height: Output height
             length: Number of frames
@@ -265,6 +267,10 @@ class GenerateVideoClient:
             "lora_pairs": lora_pairs
         }
         
+        # Add negative_prompt if provided
+        if negative_prompt:
+            input_data["negative_prompt"] = negative_prompt
+        
         # Submit job and wait
         job_id = self.submit_job(input_data)
         if not job_id:
@@ -279,6 +285,7 @@ class GenerateVideoClient:
         output_folder_path: str,
         valid_extensions: tuple = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff'),
         prompt: str = "running man, grab the gun",
+        negative_prompt: Optional[str] = None,
         width: int = 480,
         height: int = 832,
         length: int = 81,
@@ -296,6 +303,7 @@ class GenerateVideoClient:
             output_folder_path: Folder path to save results
             valid_extensions: Image file extensions to process
             prompt: Prompt text
+            negative_prompt: Negative prompt to exclude unwanted elements
             width: Output width
             height: Output height
             length: Number of frames
@@ -343,6 +351,7 @@ class GenerateVideoClient:
             result = self.create_video_from_image(
                 image_path=image_path,
                 prompt=prompt,
+                negative_prompt=negative_prompt,
                 width=width,
                 height=height,
                 length=length,
@@ -412,6 +421,7 @@ def main():
     result1 = client.create_video_from_image(
         image_path="./example_image.png",
         prompt="running man, grab the gun",
+        negative_prompt="blurry, low quality, distorted",
         width=480,
         height=832,
         length=81,
@@ -441,6 +451,7 @@ def main():
     result2 = client.create_video_from_image(
         image_path="./example_image.png",
         prompt="running man, grab the gun",
+        negative_prompt="blurry, low quality, distorted",
         width=480,
         height=832,
         length=81,

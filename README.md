@@ -50,6 +50,7 @@ client = GenerateVideoClient(
 result = client.create_video_from_image(
     image_path="./example_image.png",
     prompt="running man, grab the gun",
+    negative_prompt="blurry, low quality, distorted",
     width=480,
     height=832,
     length=81,
@@ -82,6 +83,7 @@ lora_pairs = [
 result = client.create_video_from_image(
     image_path="./example_image.png",
     prompt="running man, grab the gun",
+    negative_prompt="blurry, low quality, distorted",
     width=480,
     height=832,
     length=81,
@@ -100,6 +102,7 @@ batch_result = client.batch_process_images(
     image_folder_path="./input_images",
     output_folder_path="./output_videos",
     prompt="running man, grab the gun",
+    negative_prompt="blurry, low quality, distorted",
     width=480,
     height=832,
     length=81,
@@ -143,6 +146,7 @@ The `input` object must contain the following fields. Images can be input using 
 | Parameter | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `prompt` | `string` | Yes | - | Description text for the video to be generated |
+| `negative_prompt` | `string` | No | - | Negative prompt to exclude unwanted elements from the video |
 | `seed` | `integer` | No | `42` | Random seed for video generation |
 | `cfg` | `float` | No | `2.0` | CFG scale for generation |
 | `width` | `integer` | No | `480` | Width of the output video in pixels |
@@ -158,6 +162,7 @@ The `input` object must contain the following fields. Images can be input using 
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...",
     "seed": 42,
     "cfg": 2.0,
@@ -174,6 +179,7 @@ The `input` object must contain the following fields. Images can be input using 
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...",
     "seed": 42,
     "cfg": 2.0,
@@ -196,6 +202,7 @@ The `input` object must contain the following fields. Images can be input using 
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_path": "/my_volume/image.jpg",
     "seed": 42,
     "cfg": 2.0,
@@ -224,6 +231,7 @@ The `input` object must contain the following fields. Images can be input using 
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_url": "https://example.com/image.jpg",
     "seed": 42,
     "cfg": 2.0,
@@ -293,12 +301,13 @@ Instead of directly transmitting Base64 encoded files, you can use RunPod's Netw
 #### `__init__(runpod_endpoint_id, runpod_api_key)`
 Initialize the client with RunPod endpoint ID and API key.
 
-#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs)`
+#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs, negative_prompt)`
 Generate video from a single image.
 
 **Parameters:**
 - `image_path` (str): Path to the input image
 - `prompt` (str): Text prompt for video generation
+- `negative_prompt` (str): Negative prompt to exclude unwanted elements (default: None)
 - `width` (int): Output video width (default: 480)
 - `height` (int): Output video height (default: 832)
 - `length` (int): Number of frames (default: 81)

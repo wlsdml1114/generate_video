@@ -50,6 +50,7 @@ client = GenerateVideoClient(
 result = client.create_video_from_image(
     image_path="./example_image.png",
     prompt="running man, grab the gun",
+    negative_prompt="blurry, low quality, distorted",
     width=480,
     height=832,
     length=81,
@@ -82,6 +83,7 @@ lora_pairs = [
 result = client.create_video_from_image(
     image_path="./example_image.png",
     prompt="running man, grab the gun",
+    negative_prompt="blurry, low quality, distorted",
     width=480,
     height=832,
     length=81,
@@ -100,6 +102,7 @@ batch_result = client.batch_process_images(
     image_folder_path="./input_images",
     output_folder_path="./output_videos",
     prompt="running man, grab the gun",
+    negative_prompt="blurry, low quality, distorted",
     width=480,
     height=832,
     length=81,
@@ -143,6 +146,7 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
 | 매개변수 | 타입 | 필수 | 기본값 | 설명 |
 | --- | --- | --- | --- | --- |
 | `prompt` | `string` | 예 | - | 생성할 비디오에 대한 설명 텍스트 |
+| `negative_prompt` | `string` | 아니오 | - | 비디오에서 제외할 원하지 않는 요소에 대한 네거티브 프롬프트 |
 | `seed` | `integer` | 아니오 | `42` | 비디오 생성을 위한 랜덤 시드 |
 | `cfg` | `float` | 아니오 | `2.0` | 생성을 위한 CFG 스케일 |
 | `width` | `integer` | 아니오 | `480` | 출력 비디오의 픽셀 단위 너비 |
@@ -158,6 +162,7 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...",
     "seed": 42,
     "cfg": 2.0,
@@ -174,6 +179,7 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...",
     "seed": 42,
     "cfg": 2.0,
@@ -196,6 +202,7 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_path": "/my_volume/image.jpg",
     "seed": 42,
     "cfg": 2.0,
@@ -224,6 +231,7 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
 {
   "input": {
     "prompt": "running man, grab the gun",
+    "negative_prompt": "blurry, low quality, distorted",
     "image_url": "https://example.com/image.jpg",
     "seed": 42,
     "cfg": 2.0,
@@ -293,12 +301,13 @@ Base64로 인코딩된 파일을 직접 전송하는 대신 RunPod의 Network Vo
 #### `__init__(runpod_endpoint_id, runpod_api_key)`
 RunPod 엔드포인트 ID와 API 키로 클라이언트를 초기화합니다.
 
-#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs)`
+#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs, negative_prompt)`
 단일 이미지에서 비디오를 생성합니다.
 
 **매개변수:**
 - `image_path` (str): 입력 이미지 경로
 - `prompt` (str): 비디오 생성을 위한 텍스트 프롬프트
+- `negative_prompt` (str): 원하지 않는 요소를 제외하기 위한 네거티브 프롬프트 (기본값: None)
 - `width` (int): 출력 비디오 너비 (기본값: 480)
 - `height` (int): 출력 비디오 높이 (기본값: 832)
 - `length` (int): 프레임 수 (기본값: 81)
