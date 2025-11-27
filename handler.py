@@ -141,7 +141,7 @@ def get_videos(ws, prompt):
     return output_videos
 
 def load_workflow(workflow_path):
-    with open(workflow_path, 'r') as file:
+    with open(workflow_path, 'r', encoding='utf-8') as file:
         return json.load(file)
 
 def get_next_available_node_id(prompt, start_id=1000):
@@ -216,10 +216,10 @@ def apply_lora_chain(prompt, lora_list, high_lora_node_id, low_lora_node_id, hig
     Args:
         prompt: 워크플로우 딕셔너리
         lora_list: LoRA 리스트, 각 항목은 {"high": "lora_name.safetensors", "low": "lora_name.safetensors", "high_weight": 1.0, "low_weight": 1.0}
-        high_lora_node_id: HIGH LoRA의 시작 노드 ID
-        low_lora_node_id: LOW LoRA의 시작 노드 ID
-        high_sampling_node_id: HIGH ModelSamplingSD3 노드 ID
-        low_sampling_node_id: LOW ModelSamplingSD3 노드 ID
+        high_lora_node_id: HIGH LoRA의 기존 노드 ID (이 노드 앞에 새 LoRA를 추가)
+        low_lora_node_id: LOW LoRA의 기존 노드 ID (이 노드 앞에 새 LoRA를 추가)
+        high_sampling_node_id: HIGH ModelSamplingSD3 노드 ID (기존 LoRA 노드를 참조해야 함)
+        low_sampling_node_id: LOW ModelSamplingSD3 노드 ID (기존 LoRA 노드를 참조해야 함)
         is_flf2v: FLF2V 워크플로우 여부
     
     Returns:
@@ -228,56 +228,55 @@ def apply_lora_chain(prompt, lora_list, high_lora_node_id, low_lora_node_id, hig
     if not lora_list:
         return (high_lora_node_id, low_lora_node_id)
     
-    # 첫 번째 LoRA는 기존 노드를 업데이트
-    first_lora = lora_list[0]
+    # 기존 LoRA 노드를 유지하고, 모든 새 LoRA를 기존 LoRA 앞에 추가
+    # 최종 구조: UNET -> 새LoRA들... -> 기존LoRA -> ModelSamplingSD3
+    # add_lora_to_chain은 지정된 노드 앞에 새 LoRA를 추가하므로,
+    # 기존 LoRA 노드를 계속 전달하면 체인 앞쪽에 순차적으로 추가됨
     
-    # HIGH LoRA 첫 번째 처리
-    if first_lora.get("high"):
-        prompt[high_lora_node_id]["inputs"]["lora_name"] = first_lora["high"]
-        prompt[high_lora_node_id]["inputs"]["strength_model"] = first_lora.get("high_weight", 1.0)
-        logger.info(f"✅ HIGH LoRA 1 적용: {first_lora['high']} (강도: {first_lora.get('high_weight', 1.0)})")
+    # 기존 LoRA 노드가 체인의 마지막이 될 것 (ModelSamplingSD3가 참조할 노드)
+    final_high_lora_id = high_lora_node_id
+    final_low_lora_id = low_lora_node_id
     
-    # LOW LoRA 첫 번째 처리
-    if first_lora.get("low"):
-        prompt[low_lora_node_id]["inputs"]["lora_name"] = first_lora["low"]
-        prompt[low_lora_node_id]["inputs"]["strength_model"] = first_lora.get("low_weight", 1.0)
-        logger.info(f"✅ LOW LoRA 1 적용: {first_lora['low']} (강도: {first_lora.get('low_weight', 1.0)})")
-    
-    # 나머지 LoRA들을 체인에 추가
-    current_high_lora_id = high_lora_node_id
-    current_low_lora_id = low_lora_node_id
-    
-    for i, lora_pair in enumerate(lora_list[1:], start=2):
+    # 모든 새 LoRA를 기존 LoRA 앞에 순차적으로 추가
+    # 각 LoRA는 이전에 추가된 LoRA(또는 기존 LoRA) 앞에 추가됨
+    for i, lora_pair in enumerate(lora_list, start=1):
         # HIGH LoRA 체인에 추가
+        # add_lora_to_chain은 지정된 노드 앞에 새 LoRA를 추가하고 새 노드 ID를 반환
         if lora_pair.get("high"):
-            current_high_lora_id = add_lora_to_chain(
+            # 기존 LoRA 노드(또는 이전에 추가된 LoRA) 앞에 새 LoRA 추가
+            new_high_lora_id = add_lora_to_chain(
                 prompt, 
-                current_high_lora_id, 
+                final_high_lora_id,  # 이 노드 앞에 새 LoRA 추가
                 lora_pair["high"], 
                 lora_pair.get("high_weight", 1.0),
                 is_flf2v
             )
+            # 새로 추가된 LoRA가 이제 체인의 시작이 되지만,
+            # ModelSamplingSD3는 여전히 기존 LoRA 노드를 참조해야 함
+            logger.info(f"✅ HIGH LoRA {i} 추가: {lora_pair['high']} (강도: {lora_pair.get('high_weight', 1.0)}) -> 노드 {new_high_lora_id}")
         
         # LOW LoRA 체인에 추가
         if lora_pair.get("low"):
-            current_low_lora_id = add_lora_to_chain(
+            new_low_lora_id = add_lora_to_chain(
                 prompt, 
-                current_low_lora_id, 
+                final_low_lora_id,  # 이 노드 앞에 새 LoRA 추가
                 lora_pair["low"], 
                 lora_pair.get("low_weight", 1.0),
                 is_flf2v
             )
+            logger.info(f"✅ LOW LoRA {i} 추가: {lora_pair['low']} (강도: {lora_pair.get('low_weight', 1.0)}) -> 노드 {new_low_lora_id}")
     
-    # ModelSamplingSD3 노드가 마지막 LoRA 노드를 참조하도록 업데이트
+    # ModelSamplingSD3 노드는 기존 LoRA 노드를 참조해야 함
+    # 새 LoRA들이 추가되어도 기존 LoRA 노드가 체인의 마지막이므로
     if high_sampling_node_id in prompt:
-        prompt[high_sampling_node_id]["inputs"]["model"] = [current_high_lora_id, 0]
-        logger.info(f"✅ HIGH ModelSamplingSD3 노드({high_sampling_node_id})가 마지막 HIGH LoRA({current_high_lora_id})를 참조하도록 업데이트")
+        prompt[high_sampling_node_id]["inputs"]["model"] = [final_high_lora_id, 0]
+        logger.info(f"✅ HIGH ModelSamplingSD3 노드({high_sampling_node_id})가 기존 HIGH LoRA({final_high_lora_id})를 참조")
     
     if low_sampling_node_id in prompt:
-        prompt[low_sampling_node_id]["inputs"]["model"] = [current_low_lora_id, 0]
-        logger.info(f"✅ LOW ModelSamplingSD3 노드({low_sampling_node_id})가 마지막 LOW LoRA({current_low_lora_id})를 참조하도록 업데이트")
+        prompt[low_sampling_node_id]["inputs"]["model"] = [final_low_lora_id, 0]
+        logger.info(f"✅ LOW ModelSamplingSD3 노드({low_sampling_node_id})가 기존 LOW LoRA({final_low_lora_id})를 참조")
     
-    return (current_high_lora_id, current_low_lora_id)
+    return (final_high_lora_id, final_low_lora_id)  # 기존 LoRA 노드 반환
 
 def handler(job):
     job_input = job.get("input", {})
