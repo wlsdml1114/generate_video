@@ -129,15 +129,24 @@
   },
   "94": {
     "inputs": {
-      "fps": 32,
+      "frame_rate": 32,
+      "loop_count": 0,
+      "filename_prefix": "WanVideo_X264",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": true,
+      "pingpong": false,
+      "save_output": true,
       "images": [
         "116",
         0
       ]
     },
-    "class_type": "CreateVideo",
+    "class_type": "VHS_VideoCombine",
     "_meta": {
-      "title": "비디오 생성"
+      "title": "Video Combine 🎥🅥🅗🅢"
     }
   },
   "95": {
@@ -252,25 +261,9 @@
         0
       ]
     },
-    "class_type": "ModelSamplingSD3",
+    "class_type": "ModelSamplingSD3", 
     "_meta": {
       "title": "모델 샘플링 (SD3)"
-    }
-  },
-  "108": {
-    "inputs": {
-      "filename_prefix": "video/ComfyUI",
-      "format": "mp4",
-      "codec": "h264",
-      "video-preview": "",
-      "video": [
-        "94",
-        0
-      ]
-    },
-    "class_type": "SaveVideo",
-    "_meta": {
-      "title": "비디오 저장"
     }
   },
   "116": {

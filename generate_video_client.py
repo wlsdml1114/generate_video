@@ -69,6 +69,65 @@ class GenerateVideoClient:
             logger.error(f"❌ File base64 encoding failed: {e}")
             return None
     
+    @staticmethod
+    def encode_image_to_base64(image_data: Union[str, bytes]) -> Optional[str]:
+        """
+        Encode image data to base64 string
+        
+        Args:
+            image_data: Image file path (str) or image bytes (bytes)
+        
+        Returns:
+            Base64 encoded string or None (on failure)
+        """
+        try:
+            # If it's a file path
+            if isinstance(image_data, str) and os.path.exists(image_data):
+                with open(image_data, 'rb') as f:
+                    image_bytes = f.read()
+            # If it's already bytes
+            elif isinstance(image_data, bytes):
+                image_bytes = image_data
+            else:
+                logger.error(f"Invalid image data type: {type(image_data)}")
+                return None
+            
+            base64_data = base64.b64encode(image_bytes).decode('utf-8')
+            logger.info(f"✅ Image base64 encoding completed")
+            return base64_data
+            
+        except Exception as e:
+            logger.error(f"❌ Image base64 encoding failed: {e}")
+            return None
+    
+    @staticmethod
+    def decode_base64_to_file(base64_data: str, output_path: str) -> bool:
+        """
+        Decode base64 string to file
+        
+        Args:
+            base64_data: Base64 encoded string
+            output_path: File path to save decoded data
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            decoded_data = base64.b64decode(base64_data)
+            
+            # Create directory if needed
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            with open(output_path, 'wb') as f:
+                f.write(decoded_data)
+            
+            logger.info(f"✅ Base64 decoded and saved to: {output_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Base64 decoding failed: {e}")
+            return False
+    
     def submit_job(self, input_data: Dict[str, Any]) -> Optional[str]:
         """
         Submit job to RunPod
@@ -203,69 +262,106 @@ class GenerateVideoClient:
     
     def create_video_from_image(
         self,
-        image_path: str,
+        image: Union[str, bytes] = None,
+        image_path: Optional[str] = None,
+        image_url: Optional[str] = None,
+        image_base64: Optional[str] = None,
+        end_image: Union[str, bytes] = None,
+        end_image_path: Optional[str] = None,
+        end_image_url: Optional[str] = None,
+        end_image_base64: Optional[str] = None,
         prompt: str = "running man, grab the gun",
         negative_prompt: Optional[str] = None,
-        width: int = 480,
-        height: int = 832,
+        width: int = 720,
+        height: int = 1280,
         length: int = 81,
-        steps: int = 10,
-        seed: int = 42,
-        cfg: float = 2.0,
-        context_overlap: int = 48,
         lora_pairs: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Generate video from image
         
         Args:
-            image_path: Image file path
+            image: Image data (file path, URL, or base64 string) - auto-detected
+            image_path: Image file path (alternative to image)
+            image_url: Image URL (alternative to image)
+            image_base64: Image base64 string (alternative to image)
+            end_image: End image data for FLF2V workflow (file path, URL, or base64 string) - auto-detected
+            end_image_path: End image file path (alternative to end_image)
+            end_image_url: End image URL (alternative to end_image)
+            end_image_base64: End image base64 string (alternative to end_image)
             prompt: Prompt text
             negative_prompt: Negative prompt to exclude unwanted elements
-            width: Output width
-            height: Output height
+            width: Output width (will be adjusted to nearest multiple of 16)
+            height: Output height (will be adjusted to nearest multiple of 16)
             length: Number of frames
-            steps: Number of steps
-            seed: Seed value
-            cfg: CFG scale
-            context_overlap: Context overlap
-            lora_pairs: LoRA settings list (max 4)
+            lora_pairs: LoRA settings list (unlimited, each item: {"high": "lora_name.safetensors", "low": "lora_name.safetensors", "high_weight": 1.0, "low_weight": 1.0})
         
         Returns:
             Job result dictionary
         """
-        # Check file existence
-        if not os.path.exists(image_path):
-            return {"error": f"Image file does not exist: {image_path}"}
+        # Determine image input (handler supports auto-detection, so we can pass file paths directly)
+        image_data = None
+        if image is not None:
+            # If image is provided, check if it's a file path
+            if isinstance(image, str) and os.path.exists(image):
+                image_data = image  # Pass file path directly (handler will handle it)
+            elif isinstance(image, bytes):
+                # If it's bytes, encode to base64
+                image_data = self.encode_image_to_base64(image)
+                if not image_data:
+                    return {"error": "Failed to encode image bytes to base64"}
+            else:
+                image_data = image  # URL or base64 string
+        elif image_path:
+            if not os.path.exists(image_path):
+                return {"error": f"Image file does not exist: {image_path}"}
+            image_data = image_path  # Pass file path directly
+        elif image_url:
+            image_data = image_url  # Pass URL directly
+        elif image_base64:
+            image_data = image_base64  # Pass base64 directly
+        else:
+            return {"error": "No image input provided"}
         
-        # Encode image to base64
-        image_base64 = self.encode_file_to_base64(image_path)
-        if not image_base64:
-            return {"error": "Image base64 encoding failed"}
+        # Determine end_image input (optional, for FLF2V workflow)
+        end_image_data = None
+        if end_image is not None:
+            # If end_image is provided, check if it's a file path
+            if isinstance(end_image, str) and os.path.exists(end_image):
+                end_image_data = end_image  # Pass file path directly
+            elif isinstance(end_image, bytes):
+                # If it's bytes, encode to base64
+                end_image_data = self.encode_image_to_base64(end_image)
+                if not end_image_data:
+                    return {"error": "Failed to encode end_image bytes to base64"}
+            else:
+                end_image_data = end_image  # URL or base64 string
+        elif end_image_path:
+            if not os.path.exists(end_image_path):
+                return {"error": f"End image file does not exist: {end_image_path}"}
+            end_image_data = end_image_path  # Pass file path directly
+        elif end_image_url:
+            end_image_data = end_image_url  # Pass URL directly
+        elif end_image_base64:
+            end_image_data = end_image_base64  # Pass base64 directly
         
         # Process LoRA settings
         if lora_pairs is None:
             lora_pairs = []
         
-        # Support up to 4 LoRAs
-        lora_count = min(len(lora_pairs), 4)
-        if len(lora_pairs) > 4:
-            logger.warning(f"LoRA count is {len(lora_pairs)}. Only up to 4 LoRAs are supported. Using first 4 only.")
-            lora_pairs = lora_pairs[:4]
-        
         # Configure API input data
         input_data = {
-            "image_base64": image_base64,
+            "image": image_data,
             "prompt": prompt,
             "width": width,
             "height": height,
             "length": length,
-            "steps": steps,
-            "seed": seed,
-            "cfg": cfg,
-            "context_overlap": context_overlap,
             "lora_pairs": lora_pairs
         }
+        
+        # Add end_image if provided (enables FLF2V workflow)
+        if end_image_data:
+            input_data["end_image"] = end_image_data
         
         # Add negative_prompt if provided
         if negative_prompt:
@@ -286,14 +382,11 @@ class GenerateVideoClient:
         valid_extensions: tuple = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff'),
         prompt: str = "running man, grab the gun",
         negative_prompt: Optional[str] = None,
-        width: int = 480,
-        height: int = 832,
+        width: int = 720,
+        height: int = 1280,
         length: int = 81,
-        steps: int = 10,
-        seed: int = 42,
-        cfg: float = 2.0,
-        context_overlap: int = 48,
-        lora_pairs: Optional[List[Dict[str, Any]]] = None
+        lora_pairs: Optional[List[Dict[str, Any]]] = None,
+        end_image: Optional[Union[str, bytes]] = None
     ) -> Dict[str, Any]:
         """
         Batch process all image files in folder
@@ -304,14 +397,11 @@ class GenerateVideoClient:
             valid_extensions: Image file extensions to process
             prompt: Prompt text
             negative_prompt: Negative prompt to exclude unwanted elements
-            width: Output width
-            height: Output height
+            width: Output width (will be adjusted to nearest multiple of 16)
+            height: Output height (will be adjusted to nearest multiple of 16)
             length: Number of frames
-            steps: Number of steps
-            seed: Seed value
-            cfg: CFG scale
-            context_overlap: Context overlap
-            lora_pairs: LoRA settings list
+            lora_pairs: LoRA settings list (unlimited)
+            end_image: End image for FLF2V workflow (optional)
         
         Returns:
             Batch processing result dictionary
@@ -350,15 +440,12 @@ class GenerateVideoClient:
             # Generate video
             result = self.create_video_from_image(
                 image_path=image_path,
+                end_image=end_image,
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 width=width,
                 height=height,
                 length=length,
-                steps=steps,
-                seed=seed,
-                cfg=cfg,
-                context_overlap=context_overlap,
                 lora_pairs=lora_pairs
             )
             
@@ -422,12 +509,9 @@ def main():
         image_path="./example_image.png",
         prompt="running man, grab the gun",
         negative_prompt="blurry, low quality, distorted",
-        width=480,
-        height=832,
-        length=81,
-        steps=10,
-        seed=42,
-        cfg=2.0
+        width=720,
+        height=1280,
+        length=81
     )
     
     if result1.get('status') == 'COMPLETED':
@@ -437,14 +521,26 @@ def main():
     
     print("\n" + "-"*50 + "\n")
     
-    # Example 2: Processing with LoRA
-    print("2. Processing with LoRA")
+    # Example 2: Processing with multiple LoRAs (unlimited)
+    print("2. Processing with multiple LoRAs")
     lora_pairs = [
         {
-            "high": "your_high_lora.safetensors",
-            "low": "your_low_lora.safetensors",
+            "high": "lora1_high.safetensors",
+            "low": "lora1_low.safetensors",
             "high_weight": 1.0,
             "low_weight": 1.0
+        },
+        {
+            "high": "lora2_high.safetensors",
+            "low": "lora2_low.safetensors",
+            "high_weight": 0.8,
+            "low_weight": 0.8
+        },
+        {
+            "high": "lora3_high.safetensors",
+            "low": "lora3_low.safetensors",
+            "high_weight": 0.5,
+            "low_weight": 0.5
         }
     ]
     
@@ -452,12 +548,9 @@ def main():
         image_path="./example_image.png",
         prompt="running man, grab the gun",
         negative_prompt="blurry, low quality, distorted",
-        width=480,
-        height=832,
+        width=720,
+        height=1280,
         length=81,
-        steps=10,
-        seed=42,
-        cfg=2.0,
         lora_pairs=lora_pairs
     )
     
@@ -468,18 +561,94 @@ def main():
     
     print("\n" + "-"*50 + "\n")
     
-    # Example 3: Batch processing (uncomment to use)
-    # print("3. Batch processing")
+    # Example 3: FLF2V workflow (First-Last Frame to Video)
+    print("3. FLF2V workflow (First-Last Frame to Video)")
+    result3 = client.create_video_from_image(
+        image_path="./start_image.png",
+        end_image_path="./end_image.png",
+        prompt="smooth transformation from start to end",
+        negative_prompt="blurry, low quality, distorted",
+        width=720,
+        height=1280,
+        length=81
+    )
+    
+    if result3.get('status') == 'COMPLETED':
+        client.save_video_result(result3, "./output_flf2v.mp4")
+    else:
+        print(f"Error: {result3.get('error')}")
+    
+    print("\n" + "-"*50 + "\n")
+    
+    # Example 4: Using image URL
+    print("4. Processing with image URL")
+    result4 = client.create_video_from_image(
+        image_url="https://example.com/image.jpg",
+        prompt="running man, grab the gun",
+        width=720,
+        height=1280,
+        length=81
+    )
+    
+    if result4.get('status') == 'COMPLETED':
+        client.save_video_result(result4, "./output_url.mp4")
+    else:
+        print(f"Error: {result4.get('error')}")
+    
+    print("\n" + "-"*50 + "\n")
+    
+    # Example 5: Using base64 encoded image
+    print("5. Processing with base64 encoded image")
+    # Encode image to base64
+    image_base64 = client.encode_file_to_base64("./example_image.png")
+    if image_base64:
+        result5 = client.create_video_from_image(
+            image_base64=image_base64,
+            prompt="running man, grab the gun",
+            width=720,
+            height=1280,
+            length=81
+        )
+        
+        if result5.get('status') == 'COMPLETED':
+            client.save_video_result(result5, "./output_base64.mp4")
+        else:
+            print(f"Error: {result5.get('error')}")
+    else:
+        print("Error: Failed to encode image to base64")
+    
+    print("\n" + "-"*50 + "\n")
+    
+    # Example 6: Using static method to encode image
+    print("6. Using static method to encode image")
+    image_base64_static = GenerateVideoClient.encode_image_to_base64("./example_image.png")
+    if image_base64_static:
+        result6 = client.create_video_from_image(
+            image_base64=image_base64_static,
+            prompt="running man, grab the gun",
+            width=720,
+            height=1280,
+            length=81
+        )
+        
+        if result6.get('status') == 'COMPLETED':
+            client.save_video_result(result6, "./output_static_base64.mp4")
+        else:
+            print(f"Error: {result6.get('error')}")
+    else:
+        print("Error: Failed to encode image to base64")
+    
+    print("\n" + "-"*50 + "\n")
+    
+    # Example 5: Batch processing (uncomment to use)
+    # print("5. Batch processing")
     # batch_result = client.batch_process_images(
     #     image_folder_path="./input_images",
     #     output_folder_path="./output_videos",
     #     prompt="running man, grab the gun",
-    #     width=480,
-    #     height=832,
-    #     length=81,
-    #     steps=10,
-    #     seed=42,
-    #     cfg=2.0
+    #     width=720,
+    #     height=1280,
+    #     length=81
     # )
     
     # print(f"Batch processing result: {batch_result}")
