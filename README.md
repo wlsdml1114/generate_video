@@ -1,3 +1,7 @@
+# Important!
+# Use generate_video_v1.0.6, ksampler version is still unstable!
+# Important!
+
 # Wan2.2 Generate Video API Client
 [한국어 README 보기](README_kr.md)
 
