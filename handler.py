@@ -212,7 +212,7 @@ def filter_user_loras(lora_pairs):
     
     return filtered
 
-def apply_loras_to_workflow(prompt, lora_pairs, is_flf2v):
+def apply_loras_to_workflow(prompt, lora_pairs, is_flf2v, workflow_file):
     """
     워크플로우에 LoRA 설정을 적용하는 함수
     각 워크플로우 파일에는 이미 LoRA 노드가 설정되어 있으므로, 
@@ -222,53 +222,76 @@ def apply_loras_to_workflow(prompt, lora_pairs, is_flf2v):
         prompt: 워크플로우 딕셔너리
         lora_pairs: LoRA 페어 리스트 (lightx2v 제외)
         is_flf2v: FLF2V 워크플로우 여부
+        workflow_file: 워크플로우 파일 경로 (노드 ID 매핑을 위해 사용)
     """
     if not lora_pairs:
         return
     
-    # 모든 LoRA 노드 찾기 (lightx2v 제외)
-    user_lora_nodes = []
-    for node_id, node_data in prompt.items():
-        if node_data.get("class_type") == "LoraLoaderModelOnly":
-            lora_name = node_data.get("inputs", {}).get("lora_name", "")
-            # lightx2v_4steps_lora가 아닌 노드만 수집
-            if not lora_name or "lightx2v_4steps_lora" not in lora_name:
-                user_lora_nodes.append(node_id)
+    # 각 workflow 파일별 사용자 LoRA 노드 ID 매핑 (HIGH, LOW 순서)
+    # 체인 구조: 
+    # HIGH: UNETLoader(230) -> lightx2v(283) -> 사용자LoRA(282) -> 사용자LoRA(339) -> 사용자LoRA(340) -> 사용자LoRA(341) -> TorchCompile(391)
+    # LOW: UNETLoader(235) -> lightx2v(284) -> 사용자LoRA(336) -> 사용자LoRA(285) -> 사용자LoRA(286) -> 사용자LoRA(337) -> TorchCompile(390)
+    lora_node_mapping = {
+        "workflow/wan22_nolora.json": {
+            "high": [],
+            "low": []
+        },
+        "workflow/wan22_1lora.json": {
+            "high": ["282"],  # lightx2v(283) 다음 첫 번째 사용자 LoRA
+            "low": ["336"]   # lightx2v(284) 다음 첫 번째 사용자 LoRA
+        },
+        "workflow/wan22_2lora.json": {
+            "high": ["282", "339"],  # lightx2v(283) -> 282 -> 339
+            "low": ["336", "285"]    # lightx2v(284) -> 336 -> 285
+        },
+        "workflow/wan22_3lora.json": {
+            "high": ["282", "339", "340"],  # lightx2v(283) -> 282 -> 339 -> 340
+            "low": ["336", "285", "286"]    # lightx2v(284) -> 336 -> 285 -> 286
+        },
+        "workflow/wan22_4lora.json": {
+            "high": ["282", "339", "340", "341"],  # lightx2v(283) -> 282 -> 339 -> 340 -> 341
+            "low": ["336", "285", "286", "337"]    # lightx2v(284) -> 336 -> 285 -> 286 -> 337
+        },
+        "workflow/wan22_flf2v.json": {
+            "high": [],  # FLF2V는 별도 확인 필요
+            "low": []
+        }
+    }
     
-    # 노드 ID를 숫자로 정렬
-    user_lora_nodes = sorted([int(nid) for nid in user_lora_nodes])
+    # workflow 파일명에서 매핑 찾기
+    workflow_key = None
+    for key in lora_node_mapping.keys():
+        if key in workflow_file:
+            workflow_key = key
+            break
     
-    logger.info(f"사용자 LoRA 노드 (lightx2v 제외): {user_lora_nodes}")
-    
-    if len(user_lora_nodes) < len(lora_pairs) * 2:
-        logger.warning(f"워크플로우에 사용자 LoRA 노드가 부족합니다. 필요: {len(lora_pairs) * 2}, 발견: {len(user_lora_nodes)}")
+    if workflow_key is None:
+        logger.warning(f"워크플로우 파일 {workflow_file}에 대한 LoRA 노드 매핑을 찾을 수 없습니다.")
         return
     
-    # HIGH와 LOW를 구분하기 위해 체인 분석
-    # 각 lora_pair는 high와 low를 가지고 있으므로, 노드를 순서대로 매핑
-    # 첫 번째 절반은 HIGH, 두 번째 절반은 LOW로 가정
-    # 또는 체인 순서에 따라 HIGH와 LOW를 구분
+    high_user_nodes = lora_node_mapping[workflow_key]["high"]
+    low_user_nodes = lora_node_mapping[workflow_key]["low"]
     
-    # 간단하게 첫 절반을 HIGH, 나머지를 LOW로 가정
-    half = len(user_lora_nodes) // 2
-    high_nodes = [str(nid) for nid in user_lora_nodes[:half]]
-    low_nodes = [str(nid) for nid in user_lora_nodes[half:]]
+    logger.info(f"워크플로우: {workflow_key}")
+    logger.info(f"HIGH 사용자 LoRA 노드: {high_user_nodes}")
+    logger.info(f"LOW 사용자 LoRA 노드: {low_user_nodes}")
     
-    logger.info(f"HIGH LoRA 노드: {high_nodes}")
-    logger.info(f"LOW LoRA 노드: {low_nodes}")
+    if len(high_user_nodes) < len(lora_pairs) or len(low_user_nodes) < len(lora_pairs):
+        logger.warning(f"워크플로우에 사용자 LoRA 노드가 부족합니다. 필요: HIGH={len(lora_pairs)}, LOW={len(lora_pairs)}, 발견: HIGH={len(high_user_nodes)}, LOW={len(low_user_nodes)}")
+        return
     
     # 각 lora_pair에 대해 HIGH와 LOW를 적용
     for i, lora_pair in enumerate(lora_pairs):
         # HIGH LoRA 적용
-        if i < len(high_nodes) and lora_pair.get("high"):
-            high_node_id = high_nodes[i]
+        if i < len(high_user_nodes) and lora_pair.get("high"):
+            high_node_id = high_user_nodes[i]
             prompt[high_node_id]["inputs"]["lora_name"] = lora_pair["high"]
             prompt[high_node_id]["inputs"]["strength_model"] = lora_pair.get("high_weight", 1.0)
             logger.info(f"✅ HIGH LoRA {i+1} 적용: {lora_pair['high']} (강도: {lora_pair.get('high_weight', 1.0)}) -> 노드 {high_node_id}")
         
         # LOW LoRA 적용
-        if i < len(low_nodes) and lora_pair.get("low"):
-            low_node_id = low_nodes[i]
+        if i < len(low_user_nodes) and lora_pair.get("low"):
+            low_node_id = low_user_nodes[i]
             prompt[low_node_id]["inputs"]["lora_name"] = lora_pair["low"]
             prompt[low_node_id]["inputs"]["strength_model"] = lora_pair.get("low_weight", 1.0)
             logger.info(f"✅ LOW LoRA {i+1} 적용: {lora_pair['low']} (강도: {lora_pair.get('low_weight', 1.0)}) -> 노드 {low_node_id}")
@@ -398,7 +421,7 @@ def handler(job):
     
     # LoRA 설정 적용 (lightx2v 제외한 사용자 LoRA만)
     if user_lora_pairs:
-        apply_loras_to_workflow(prompt, user_lora_pairs, is_flf2v)
+        apply_loras_to_workflow(prompt, user_lora_pairs, is_flf2v, workflow_file)
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
     logger.info(f"Connecting to WebSocket: {ws_url}")
