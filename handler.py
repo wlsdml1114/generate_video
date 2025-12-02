@@ -141,6 +141,11 @@ def get_videos(ws, prompt):
     return output_videos
 
 def load_workflow(workflow_path):
+    """워크플로우 파일을 로드하는 함수"""
+    # 상대 경로인 경우 현재 파일 기준으로 절대 경로 변환
+    if not os.path.isabs(workflow_path):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        workflow_path = os.path.join(current_dir, workflow_path)
     with open(workflow_path, 'r', encoding='utf-8') as file:
         return json.load(file)
 
@@ -151,132 +156,122 @@ def get_next_available_node_id(prompt, start_id=1000):
         node_id += 1
     return str(node_id)
 
-def add_lora_to_chain(prompt, existing_lora_node_id, lora_name, strength, is_flf2v):
+def count_user_loras(lora_pairs):
     """
-    기존 LoRA 체인에 새로운 LoRA를 추가하는 함수 (Linked list 방식)
+    사용자 LoRA 개수를 계산하는 함수 (lightx2v_4steps_lora 제외)
     
     Args:
-        prompt: 워크플로우 딕셔너리
-        existing_lora_node_id: 기존 LoRA 노드 ID (문자열)
-        lora_name: 새로 추가할 LoRA 파일명
-        strength: LoRA 강도
-        is_flf2v: FLF2V 워크플로우 여부
+        lora_pairs: LoRA 페어 리스트
     
     Returns:
-        새로 생성된 LoRA 노드 ID
+        lightx2v_4steps_lora를 제외한 LoRA 개수
     """
-    # 기존 LoRA 노드 확인
-    if existing_lora_node_id not in prompt:
-        raise Exception(f"기존 LoRA 노드 {existing_lora_node_id}를 찾을 수 없습니다.")
+    if not lora_pairs:
+        return 0
     
-    existing_lora = prompt[existing_lora_node_id]
-    if existing_lora.get("class_type") != "LoraLoaderModelOnly":
-        raise Exception(f"노드 {existing_lora_node_id}는 LoRA 노드가 아닙니다.")
-    
-    # 기존 LoRA의 입력(이전 노드)을 찾음
-    previous_node_input = existing_lora["inputs"].get("model")
-    if not previous_node_input or not isinstance(previous_node_input, list):
-        raise Exception(f"기존 LoRA 노드 {existing_lora_node_id}의 입력을 찾을 수 없습니다.")
-    
-    previous_node_id = str(previous_node_input[0])
-    
-    # 새로운 LoRA 노드 생성
-    new_lora_node_id = get_next_available_node_id(prompt)
-    
-    # 새 LoRA 노드 생성 (기존 LoRA 노드의 구조를 복사)
-    new_lora_node = {
-        "inputs": {
-            "lora_name": lora_name,
-            "strength_model": strength,
-            "model": [
-                previous_node_id,  # 기존 LoRA가 받던 입력을 새 LoRA가 받음
-                0
-            ]
-        },
-        "class_type": "LoraLoaderModelOnly",
-        "_meta": {
-            "title": f"LoRA 로드 (모델 전용) - {lora_name}"
-        }
-    }
-    
-    # 새 LoRA 노드를 워크플로우에 추가
-    prompt[new_lora_node_id] = new_lora_node
-    
-    # 기존 LoRA 노드의 입력을 새 LoRA 노드로 변경
-    existing_lora["inputs"]["model"] = [new_lora_node_id, 0]
-    
-    logger.info(f"✅ LoRA 추가: {previous_node_id} -> {new_lora_node_id} -> {existing_lora_node_id} (LoRA: {lora_name}, 강도: {strength})")
-    
-    return new_lora_node_id
-
-def apply_lora_chain(prompt, lora_list, high_lora_node_id, low_lora_node_id, high_sampling_node_id, low_sampling_node_id, is_flf2v):
-    """
-    LoRA 리스트를 체인에 추가하는 함수
-    
-    Args:
-        prompt: 워크플로우 딕셔너리
-        lora_list: LoRA 리스트, 각 항목은 {"high": "lora_name.safetensors", "low": "lora_name.safetensors", "high_weight": 1.0, "low_weight": 1.0}
-        high_lora_node_id: HIGH LoRA의 기존 노드 ID (이 노드 앞에 새 LoRA를 추가)
-        low_lora_node_id: LOW LoRA의 기존 노드 ID (이 노드 앞에 새 LoRA를 추가)
-        high_sampling_node_id: HIGH ModelSamplingSD3 노드 ID (기존 LoRA 노드를 참조해야 함)
-        low_sampling_node_id: LOW ModelSamplingSD3 노드 ID (기존 LoRA 노드를 참조해야 함)
-        is_flf2v: FLF2V 워크플로우 여부
-    
-    Returns:
-        (마지막 HIGH LoRA 노드 ID, 마지막 LOW LoRA 노드 ID)
-    """
-    if not lora_list:
-        return (high_lora_node_id, low_lora_node_id)
-    
-    # 기존 LoRA 노드를 유지하고, 모든 새 LoRA를 기존 LoRA 앞에 추가
-    # 최종 구조: UNET -> 새LoRA들... -> 기존LoRA -> ModelSamplingSD3
-    # add_lora_to_chain은 지정된 노드 앞에 새 LoRA를 추가하므로,
-    # 기존 LoRA 노드를 계속 전달하면 체인 앞쪽에 순차적으로 추가됨
-    
-    # 기존 LoRA 노드가 체인의 마지막이 될 것 (ModelSamplingSD3가 참조할 노드)
-    final_high_lora_id = high_lora_node_id
-    final_low_lora_id = low_lora_node_id
-    
-    # 모든 새 LoRA를 기존 LoRA 앞에 순차적으로 추가
-    # 각 LoRA는 이전에 추가된 LoRA(또는 기존 LoRA) 앞에 추가됨
-    for i, lora_pair in enumerate(lora_list, start=1):
-        # HIGH LoRA 체인에 추가
-        # add_lora_to_chain은 지정된 노드 앞에 새 LoRA를 추가하고 새 노드 ID를 반환
-        if lora_pair.get("high"):
-            # 기존 LoRA 노드(또는 이전에 추가된 LoRA) 앞에 새 LoRA 추가
-            new_high_lora_id = add_lora_to_chain(
-                prompt, 
-                final_high_lora_id,  # 이 노드 앞에 새 LoRA 추가
-                lora_pair["high"], 
-                lora_pair.get("high_weight", 1.0),
-                is_flf2v
-            )
-            # 새로 추가된 LoRA가 이제 체인의 시작이 되지만,
-            # ModelSamplingSD3는 여전히 기존 LoRA 노드를 참조해야 함
-            logger.info(f"✅ HIGH LoRA {i} 추가: {lora_pair['high']} (강도: {lora_pair.get('high_weight', 1.0)}) -> 노드 {new_high_lora_id}")
+    count = 0
+    for lora_pair in lora_pairs:
+        high = lora_pair.get("high", "")
+        low = lora_pair.get("low", "")
         
-        # LOW LoRA 체인에 추가
-        if lora_pair.get("low"):
-            new_low_lora_id = add_lora_to_chain(
-                prompt, 
-                final_low_lora_id,  # 이 노드 앞에 새 LoRA 추가
-                lora_pair["low"], 
-                lora_pair.get("low_weight", 1.0),
-                is_flf2v
-            )
-            logger.info(f"✅ LOW LoRA {i} 추가: {lora_pair['low']} (강도: {lora_pair.get('low_weight', 1.0)}) -> 노드 {new_low_lora_id}")
+        # lightx2v_4steps_lora가 아닌 경우만 카운트
+        if high and "lightx2v_4steps_lora" not in high:
+            count += 1
+        elif low and "lightx2v_4steps_lora" not in low:
+            count += 1
+        elif high and low and "lightx2v_4steps_lora" not in high and "lightx2v_4steps_lora" not in low:
+            count += 1
     
-    # ModelSamplingSD3 노드는 기존 LoRA 노드를 참조해야 함
-    # 새 LoRA들이 추가되어도 기존 LoRA 노드가 체인의 마지막이므로
-    if high_sampling_node_id in prompt:
-        prompt[high_sampling_node_id]["inputs"]["model"] = [final_high_lora_id, 0]
-        logger.info(f"✅ HIGH ModelSamplingSD3 노드({high_sampling_node_id})가 기존 HIGH LoRA({final_high_lora_id})를 참조")
+    return count
+
+def filter_user_loras(lora_pairs):
+    """
+    lightx2v_4steps_lora를 제외한 사용자 LoRA만 필터링
     
-    if low_sampling_node_id in prompt:
-        prompt[low_sampling_node_id]["inputs"]["model"] = [final_low_lora_id, 0]
-        logger.info(f"✅ LOW ModelSamplingSD3 노드({low_sampling_node_id})가 기존 LOW LoRA({final_low_lora_id})를 참조")
+    Args:
+        lora_pairs: LoRA 페어 리스트
     
-    return (final_high_lora_id, final_low_lora_id)  # 기존 LoRA 노드 반환
+    Returns:
+        lightx2v_4steps_lora를 제외한 LoRA 페어 리스트
+    """
+    if not lora_pairs:
+        return []
+    
+    filtered = []
+    for lora_pair in lora_pairs:
+        high = lora_pair.get("high", "")
+        low = lora_pair.get("low", "")
+        
+        # lightx2v_4steps_lora가 포함된 경우 제외
+        if high and "lightx2v_4steps_lora" in high:
+            continue
+        if low and "lightx2v_4steps_lora" in low:
+            continue
+        
+        filtered.append(lora_pair)
+    
+    return filtered
+
+def apply_loras_to_workflow(prompt, lora_pairs, is_flf2v):
+    """
+    워크플로우에 LoRA 설정을 적용하는 함수
+    각 워크플로우 파일에는 이미 LoRA 노드가 설정되어 있으므로, 
+    해당 노드의 lora_name과 strength_model만 업데이트
+    
+    Args:
+        prompt: 워크플로우 딕셔너리
+        lora_pairs: LoRA 페어 리스트 (lightx2v 제외)
+        is_flf2v: FLF2V 워크플로우 여부
+    """
+    if not lora_pairs:
+        return
+    
+    # 모든 LoRA 노드 찾기 (lightx2v 제외)
+    user_lora_nodes = []
+    for node_id, node_data in prompt.items():
+        if node_data.get("class_type") == "LoraLoaderModelOnly":
+            lora_name = node_data.get("inputs", {}).get("lora_name", "")
+            # lightx2v_4steps_lora가 아닌 노드만 수집
+            if not lora_name or "lightx2v_4steps_lora" not in lora_name:
+                user_lora_nodes.append(node_id)
+    
+    # 노드 ID를 숫자로 정렬
+    user_lora_nodes = sorted([int(nid) for nid in user_lora_nodes])
+    
+    logger.info(f"사용자 LoRA 노드 (lightx2v 제외): {user_lora_nodes}")
+    
+    if len(user_lora_nodes) < len(lora_pairs) * 2:
+        logger.warning(f"워크플로우에 사용자 LoRA 노드가 부족합니다. 필요: {len(lora_pairs) * 2}, 발견: {len(user_lora_nodes)}")
+        return
+    
+    # HIGH와 LOW를 구분하기 위해 체인 분석
+    # 각 lora_pair는 high와 low를 가지고 있으므로, 노드를 순서대로 매핑
+    # 첫 번째 절반은 HIGH, 두 번째 절반은 LOW로 가정
+    # 또는 체인 순서에 따라 HIGH와 LOW를 구분
+    
+    # 간단하게 첫 절반을 HIGH, 나머지를 LOW로 가정
+    half = len(user_lora_nodes) // 2
+    high_nodes = [str(nid) for nid in user_lora_nodes[:half]]
+    low_nodes = [str(nid) for nid in user_lora_nodes[half:]]
+    
+    logger.info(f"HIGH LoRA 노드: {high_nodes}")
+    logger.info(f"LOW LoRA 노드: {low_nodes}")
+    
+    # 각 lora_pair에 대해 HIGH와 LOW를 적용
+    for i, lora_pair in enumerate(lora_pairs):
+        # HIGH LoRA 적용
+        if i < len(high_nodes) and lora_pair.get("high"):
+            high_node_id = high_nodes[i]
+            prompt[high_node_id]["inputs"]["lora_name"] = lora_pair["high"]
+            prompt[high_node_id]["inputs"]["strength_model"] = lora_pair.get("high_weight", 1.0)
+            logger.info(f"✅ HIGH LoRA {i+1} 적용: {lora_pair['high']} (강도: {lora_pair.get('high_weight', 1.0)}) -> 노드 {high_node_id}")
+        
+        # LOW LoRA 적용
+        if i < len(low_nodes) and lora_pair.get("low"):
+            low_node_id = low_nodes[i]
+            prompt[low_node_id]["inputs"]["lora_name"] = lora_pair["low"]
+            prompt[low_node_id]["inputs"]["strength_model"] = lora_pair.get("low_weight", 1.0)
+            logger.info(f"✅ LOW LoRA {i+1} 적용: {lora_pair['low']} (강도: {lora_pair.get('low_weight', 1.0)}) -> 노드 {low_node_id}")
 
 def handler(job):
     job_input = job.get("input", {})
@@ -334,16 +329,46 @@ def handler(job):
     
     # 워크플로우 파일 선택 (end_image_*가 있으면 FLF2V 워크플로 사용)
     is_flf2v = end_image_path_local is not None
-    workflow_file = "/wan22_flf2v_api.json" if is_flf2v else "/wan22_api.json"
-    logger.info(f"Using {'FLF2V' if is_flf2v else 'single image'} workflow")
+    
+    # LoRA 개수 계산 (lightx2v_4steps_lora 제외)
+    lora_pairs = job_input.get("lora_pairs", [])
+    user_lora_pairs = filter_user_loras(lora_pairs)
+    lora_count = count_user_loras(lora_pairs)
+    
+    logger.info(f"사용자 LoRA 개수 (lightx2v 제외): {lora_count}")
+    
+    # LoRA 개수에 따라 워크플로우 파일 선택
+    if is_flf2v:
+        # FLF2V 워크플로우는 현재 하나만 있음
+        workflow_file = "workflow/wan22_flf2v.json"
+        logger.info(f"Using FLF2V workflow: {workflow_file}")
+    else:
+        # 단일 이미지 워크플로우
+        if lora_count == 0:
+            workflow_file = "workflow/wan22_nolora.json"
+        elif lora_count == 1:
+            workflow_file = "workflow/wan22_1lora.json"
+        elif lora_count == 2:
+            workflow_file = "workflow/wan22_2lora.json"
+        elif lora_count == 3:
+            workflow_file = "workflow/wan22_3lora.json"
+        elif lora_count >= 4:
+            workflow_file = "workflow/wan22_4lora.json"
+            if lora_count > 4:
+                logger.warning(f"LoRA 개수가 {lora_count}개입니다. 최대 4개까지만 지원됩니다. 처음 4개만 사용합니다.")
+                user_lora_pairs = user_lora_pairs[:4]
+        else:
+            workflow_file = "workflow/wan22_nolora.json"
+        
+        logger.info(f"Using single image workflow: {workflow_file} (LoRA 개수: {lora_count})")
     
     prompt = load_workflow(workflow_file)
     
     length = job_input.get("length", 81)
     
     # 해상도(폭/높이) 16배수 보정
-    original_width = job_input.get("width", 720)
-    original_height = job_input.get("height", 1280)
+    original_width = job_input.get("width", 480)
+    original_height = job_input.get("height", 720)
     adjusted_width = to_nearest_multiple_of_16(original_width)
     adjusted_height = to_nearest_multiple_of_16(original_height)
     if adjusted_width != original_width:
@@ -351,45 +376,29 @@ def handler(job):
     if adjusted_height != original_height:
         logger.info(f"Height adjusted to nearest multiple of 16: {original_height} -> {adjusted_height}")
 
-    if is_flf2v:
-        # FLF2V 워크플로우 (wan22_flf2v_api.json)
-        # Start 이미지: 노드 102
-        prompt["102"]["inputs"]["image"] = image_path
-        # End 이미지: 노드 103
-        prompt["103"]["inputs"]["image"] = end_image_path_local
-        # Positive Prompt: 노드 6
-        prompt["6"]["inputs"]["text"] = job_input.get("prompt", "")
-        # Negative Prompt: 노드 7
-        prompt["7"]["inputs"]["text"] = job_input.get("negative_prompt", "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards")
-        # Width: 노드 99
-        prompt["99"]["inputs"]["value"] = adjusted_width
-        # Height: 노드 100
-        prompt["100"]["inputs"]["value"] = adjusted_height
-        # Length: 노드 67
-        prompt["67"]["inputs"]["length"] = length
-    else:
-        # 단일 이미지 워크플로우 (wan22_api.json)
-        # 이미지 로드: 노드 97
-        prompt["97"]["inputs"]["image"] = image_path
-        # Positive Prompt: 노드 93
-        prompt["93"]["inputs"]["text"] = job_input.get("prompt", "")
-        # Negative Prompt: 노드 89
-        prompt["89"]["inputs"]["text"] = job_input.get("negative_prompt", "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards")
-        # Width/Height: 노드 118 (ResizeAndPadImage)
-        prompt["118"]["inputs"]["target_width"] = adjusted_width
-        prompt["118"]["inputs"]["target_height"] = adjusted_height
-        # Length: 노드 98
-        prompt["98"]["inputs"]["length"] = length
+    # 공통 노드 설정 (FLF2V와 단일 이미지 워크플로우 모두 동일)
+    # 이미지 로드: 노드 260
+    prompt["260"]["inputs"]["image"] = image_path
+    # Positive Prompt: 노드 6 (노드 246을 통해 입력)
+    prompt["246"]["inputs"]["value"] = job_input.get("prompt", "")
+    # Negative Prompt: 노드 7 (노드 247을 통해 입력)
+    negative_prompt = job_input.get("negative_prompt", "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards")
+    prompt["247"]["inputs"]["value"] = negative_prompt
+    # Width: 노드 849
+    prompt["849"]["inputs"]["value"] = adjusted_width
+    # Height: 노드 848
+    prompt["848"]["inputs"]["value"] = adjusted_height
+    # Length: 노드 846
+    prompt["846"]["inputs"]["value"] = length
     
-    # LoRA 설정 적용
-    lora_list = job_input.get("lora_pairs", [])
-    if lora_list:
-        if is_flf2v:
-            # FLF2V 워크플로우: HIGH LoRA(91), LOW LoRA(92), HIGH Sampling(54), LOW Sampling(55)
-            apply_lora_chain(prompt, lora_list, "91", "92", "54", "55", is_flf2v)
-        else:
-            # 단일 이미지 워크플로우: HIGH LoRA(101), LOW LoRA(102), HIGH Sampling(104), LOW Sampling(103)
-            apply_lora_chain(prompt, lora_list, "101", "102", "104", "103", is_flf2v)
+    # FLF2V 전용 설정
+    if is_flf2v:
+        # End 이미지: 노드 483
+        prompt["483"]["inputs"]["image"] = end_image_path_local
+    
+    # LoRA 설정 적용 (lightx2v 제외한 사용자 LoRA만)
+    if user_lora_pairs:
+        apply_loras_to_workflow(prompt, user_lora_pairs, is_flf2v)
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
     logger.info(f"Connecting to WebSocket: {ws_url}")
