@@ -209,6 +209,7 @@ def handler(job):
     prompt["235"]["inputs"]["value"] = adjusted_width
     prompt["236"]["inputs"]["value"] = adjusted_height
     prompt["498"]["inputs"]["context_overlap"] = job_input.get("context_overlap", 48)
+    prompt["498"]["inputs"]["context_frames"] = length
     
     # step 설정 적용
     if "834" in prompt:
