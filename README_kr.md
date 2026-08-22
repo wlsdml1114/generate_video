@@ -154,6 +154,9 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
 | `length` | `integer` | 아니오 | `81` | 생성할 비디오의 길이 |
 | `steps` | `integer` | 아니오 | `10` | 디노이징 스텝 수 |
 | `context_overlap` | `integer` | 아니오 | `48` | 컨텍스트 오버랩 값 |
+| `keep_models_loaded` | `boolean` | 아니오 | `false` | `true`이면 작업 종료 시 강제 모델 언로드를 건너뛰어 VRAM이 허용하는 경우 웜 워커가 모델을 재사용합니다 |
+
+`keep_models_loaded`는 문자열이 아닌 JSON 불리언이어야 합니다. VRAM이 필요하면 ComfyUI가 모델을 선택적으로 언로드할 수 있으며, 이 옵션은 각 작업 종료 시 실행되는 무조건적인 언로드만 비활성화합니다.
 
 **요청 예시:**
 
@@ -169,7 +172,8 @@ print(f"배치 처리 완료: {batch_result['successful']}/{batch_result['total_
     "width": 480,
     "height": 832,
     "length": 81,
-    "steps": 10
+    "steps": 10,
+    "keep_models_loaded": true
   }
 }
 ```
@@ -301,7 +305,7 @@ Base64로 인코딩된 파일을 직접 전송하는 대신 RunPod의 Network Vo
 #### `__init__(runpod_endpoint_id, runpod_api_key)`
 RunPod 엔드포인트 ID와 API 키로 클라이언트를 초기화합니다.
 
-#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs, negative_prompt)`
+#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs, negative_prompt, keep_models_loaded)`
 단일 이미지에서 비디오를 생성합니다.
 
 **매개변수:**
@@ -316,6 +320,7 @@ RunPod 엔드포인트 ID와 API 키로 클라이언트를 초기화합니다.
 - `cfg` (float): CFG 스케일 (기본값: 2.0)
 - `context_overlap` (int): 컨텍스트 오버랩 (기본값: 48)
 - `lora_pairs` (list): LoRA 설정 쌍 (기본값: None)
+- `keep_models_loaded` (bool): 작업 종료 시 강제 모델 언로드를 건너뜁니다 (기본값: False)
 
 #### `batch_process_images(image_folder_path, output_folder_path, valid_extensions, ...)`
 폴더 내 여러 이미지를 처리합니다.

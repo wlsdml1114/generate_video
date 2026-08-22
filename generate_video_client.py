@@ -275,7 +275,8 @@ class GenerateVideoClient:
         width: int = 720,
         height: int = 1280,
         length: int = 81,
-        lora_pairs: Optional[List[Dict[str, Any]]] = None
+        lora_pairs: Optional[List[Dict[str, Any]]] = None,
+        keep_models_loaded: bool = False
     ) -> Dict[str, Any]:
         """
         Generate video from image
@@ -295,6 +296,7 @@ class GenerateVideoClient:
             height: Output height (will be adjusted to nearest multiple of 16)
             length: Number of frames
             lora_pairs: LoRA settings list (unlimited, each item: {"high": "lora_name.safetensors", "low": "lora_name.safetensors", "high_weight": 1.0, "low_weight": 1.0})
+            keep_models_loaded: Keep models in VRAM between warm-worker jobs when possible
         
         Returns:
             Job result dictionary
@@ -348,6 +350,9 @@ class GenerateVideoClient:
         # Process LoRA settings
         if lora_pairs is None:
             lora_pairs = []
+
+        if not isinstance(keep_models_loaded, bool):
+            raise TypeError("keep_models_loaded must be a boolean")
         
         # Configure API input data
         input_data = {
@@ -356,7 +361,8 @@ class GenerateVideoClient:
             "width": width,
             "height": height,
             "length": length,
-            "lora_pairs": lora_pairs
+            "lora_pairs": lora_pairs,
+            "keep_models_loaded": keep_models_loaded
         }
         
         # Add end_image if provided (enables FLF2V workflow)
@@ -386,7 +392,8 @@ class GenerateVideoClient:
         height: int = 1280,
         length: int = 81,
         lora_pairs: Optional[List[Dict[str, Any]]] = None,
-        end_image: Optional[Union[str, bytes]] = None
+        end_image: Optional[Union[str, bytes]] = None,
+        keep_models_loaded: bool = False
     ) -> Dict[str, Any]:
         """
         Batch process all image files in folder
@@ -402,6 +409,7 @@ class GenerateVideoClient:
             length: Number of frames
             lora_pairs: LoRA settings list (unlimited)
             end_image: End image for FLF2V workflow (optional)
+            keep_models_loaded: Keep models in VRAM between warm-worker jobs when possible
         
         Returns:
             Batch processing result dictionary
@@ -446,7 +454,8 @@ class GenerateVideoClient:
                 width=width,
                 height=height,
                 length=length,
-                lora_pairs=lora_pairs
+                lora_pairs=lora_pairs,
+                keep_models_loaded=keep_models_loaded
             )
             
             if result.get('status') == 'COMPLETED':

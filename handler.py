@@ -11,6 +11,7 @@ import urllib.parse
 import binascii # Base64 에러 처리를 위해 import
 import subprocess
 import time
+from workflow_options import configure_model_retention, get_keep_models_loaded
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -298,6 +299,7 @@ def apply_loras_to_workflow(prompt, lora_pairs, is_flf2v, workflow_file):
 
 def handler(job):
     job_input = job.get("input", {})
+    keep_models_loaded = get_keep_models_loaded(job_input)
 
     logger.info(f"Received job input: {job_input}")
     task_id = f"task_{uuid.uuid4()}"
@@ -386,6 +388,14 @@ def handler(job):
         logger.info(f"Using single image workflow: {workflow_file} (LoRA 개수: {lora_count})")
     
     prompt = load_workflow(workflow_file)
+    configured_nodes = configure_model_retention(prompt, keep_models_loaded)
+    logger.info(
+        "Model retention configured: keep_models_loaded=%s, "
+        "unload_all_models=%s, nodes=%s",
+        keep_models_loaded,
+        not keep_models_loaded,
+        configured_nodes,
+    )
     
     length = job_input.get("length", 81)
     

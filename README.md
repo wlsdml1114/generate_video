@@ -158,6 +158,9 @@ The `input` object must contain the following fields. Images can be input using 
 | `length` | `integer` | No | `81` | Length of the generated video |
 | `steps` | `integer` | No | `10` | Number of denoising steps |
 | `context_overlap` | `integer` | No | `48` | Context overlap value |
+| `keep_models_loaded` | `boolean` | No | `false` | When `true`, skip the workflow's forced end-of-job model unload so a warm worker can reuse models when VRAM permits |
+
+`keep_models_loaded` must be a JSON boolean, not a string. ComfyUI may still selectively evict models when it needs VRAM; this option only disables the unconditional unload at the end of every job.
 
 **Request Examples:**
 
@@ -173,7 +176,8 @@ The `input` object must contain the following fields. Images can be input using 
     "width": 480,
     "height": 832,
     "length": 81,
-    "steps": 10
+    "steps": 10,
+    "keep_models_loaded": true
   }
 }
 ```
@@ -305,7 +309,7 @@ Instead of directly transmitting Base64 encoded files, you can use RunPod's Netw
 #### `__init__(runpod_endpoint_id, runpod_api_key)`
 Initialize the client with RunPod endpoint ID and API key.
 
-#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs, negative_prompt)`
+#### `create_video_from_image(image_path, prompt, width, height, length, steps, seed, cfg, context_overlap, lora_pairs, negative_prompt, keep_models_loaded)`
 Generate video from a single image.
 
 **Parameters:**
@@ -320,6 +324,7 @@ Generate video from a single image.
 - `cfg` (float): CFG scale (default: 2.0)
 - `context_overlap` (int): Context overlap (default: 48)
 - `lora_pairs` (list): LoRA configuration pairs (default: None)
+- `keep_models_loaded` (bool): Skip forced end-of-job model unloading (default: False)
 
 #### `batch_process_images(image_folder_path, output_folder_path, valid_extensions, ...)`
 Process multiple images in a folder.

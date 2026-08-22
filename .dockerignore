@@ -1,0 +1,9 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+test_*.py
+test_before_*.json
+test_after_*.json
+*.log
